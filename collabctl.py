@@ -170,8 +170,27 @@ def request(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
     return json.loads(raw) if raw else None
 
 
+def natural_summary(payload: dict[str, Any]) -> str:
+    labels = {
+        "task": "Task",
+        "question": "Question",
+        "progress": "Progress",
+        "ack": "Acknowledgement",
+        "assist_request": "Assistance requested",
+        "blocker": "Blocker",
+        "handoff": "Handoff",
+        "review": "Review",
+    }
+    label = labels.get(payload.get("kind"), str(payload.get("kind", "Message")).title())
+    return f"{label} from {payload.get('sender', 'agent')}:\n{payload['summary']}"
+
+
 def discord_content(payload: dict[str, Any]) -> str:
-    content = "```json\n" + json.dumps(payload, indent=2) + "\n```"
+    protocol = "```json\n" + json.dumps(payload, indent=2, ensure_ascii=False) + "\n```"
+    content = f"{natural_summary(payload)}\n\n||{protocol}||"
+    if len(content) > MESSAGE_LIMIT:
+        compact_protocol = "```json\n" + json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n```"
+        content = f"{natural_summary(payload)}\n\n||{compact_protocol}||"
     if len(content) > MESSAGE_LIMIT:
         fail("Discord message exceeds 2000 characters")
     return content
@@ -257,12 +276,49 @@ def message_number(message_id: str) -> int:
     return int(message_id)
 
 
-def parse_structured_message(message: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def natural_task_payload(message: dict[str, Any], content: str) -> dict[str, Any]:
+    message_id = str(message.get("id", ""))
+    if not message_id.isdigit():
+        fail("natural-language messages require a numeric Discord message ID")
+    mentioned_agents = set(re.findall(r"\bagent[-\s]?([ab])\b", content.lower()))
+    target = "both-agents" if len(mentioned_agents) != 1 else f"agent-{next(iter(mentioned_agents))}"
+    channel_value = str(message.get("channel_id", ""))
+    payload = {
+        "schema_version": "0.2",
+        "message_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"discord-message:{channel_value}:{message_id}")),
+        "correlation_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"discord-correlation:{channel_value}:{message_id}")),
+        "task_id": f"NL-{message_id}",
+        "kind": "task",
+        "sender": "human-owner",
+        "target": target,
+        "created_at": message.get("timestamp") or now_utc(),
+        "status": "proposed",
+        "summary": " ".join(content.split())[:1500],
+        "source": {
+            "discord_message_id": message_id,
+            "author_id": str((message.get("author") or {}).get("id", "")),
+            "request_text": content.strip(),
+        },
+    }
+    return validate(payload)
+
+
+def parse_structured_message(
+    message: dict[str, Any], natural_language: bool = False
+) -> tuple[dict[str, Any] | None, str | None]:
     content = message.get("content")
     if not isinstance(content, str):
         return None, None
-    match = re.fullmatch(r"\s*```json\s*(.*?)\s*```\s*", content, flags=re.IGNORECASE | re.DOTALL)
+    match = re.search(r"```json\s*(.*?)\s*```", content, flags=re.IGNORECASE | re.DOTALL)
     if not match:
+        author = message.get("author") if isinstance(message.get("author"), dict) else {}
+        if natural_language and not author.get("bot") and content.strip():
+            if content.lstrip().startswith("{") and content.rstrip().endswith("}"):
+                return None, "plain JSON is not accepted; wrap it in a ```json code block"
+            try:
+                return natural_task_payload(message, content), None
+            except ValueError as error:
+                return None, str(error)
         return None, None
     try:
         payload = json.loads(match.group(1))
@@ -312,7 +368,10 @@ def inbox_entry(
 
 
 def consume_messages(
-    target_channel: str, raw_messages: list[dict[str, Any]], state: dict[str, Any]
+    target_channel: str,
+    raw_messages: list[dict[str, Any]],
+    state: dict[str, Any],
+    natural_language: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     channel_state = state["channels"].setdefault(
         target_channel, {"last_message_id": None, "seen_message_ids": [], "inbox": []}
@@ -338,7 +397,7 @@ def consume_messages(
             continue
         seen.add(message_id)
         newest = max(newest or current_number, current_number)
-        payload, error = parse_structured_message(message)
+        payload, error = parse_structured_message(message, natural_language=natural_language)
         if error:
             rejected.append({"discord_message_id": message_id, "error": error})
             continue
@@ -362,7 +421,9 @@ def consume_messages(
     return result, state
 
 
-def fetch_and_store_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> dict[str, Any]:
+def fetch_and_store_messages(
+    target_channel: str, state_path: str, limit: int, dry_run: bool, natural_language: bool = False
+) -> dict[str, Any]:
     if not 1 <= limit <= 100:
         fail("--limit must be between 1 and 100")
     state = load_state(state_path)
@@ -377,13 +438,17 @@ def fetch_and_store_messages(target_channel: str, state_path: str, limit: int, d
     raw_messages = request("GET", path)
     if not isinstance(raw_messages, list) or any(not isinstance(item, dict) for item in raw_messages):
         fail("Discord messages response must be a list of objects")
-    result, updated_state = consume_messages(target_channel, raw_messages, state)
+    result, updated_state = consume_messages(
+        target_channel, raw_messages, state, natural_language=natural_language
+    )
     save_state(state_path, updated_state)
     return result
 
 
-def poll_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> None:
-    result = fetch_and_store_messages(target_channel, state_path, limit, dry_run)
+def poll_messages(
+    target_channel: str, state_path: str, limit: int, dry_run: bool, natural_language: bool
+) -> None:
+    result = fetch_and_store_messages(target_channel, state_path, limit, dry_run, natural_language)
     print(json.dumps(result, indent=2))
 
 
@@ -448,6 +513,7 @@ def dispatch_messages(
     handler: list[str] | None,
     timeout: int,
     dry_run: bool,
+    natural_language: bool = False,
     emit: bool = True,
 ) -> dict[str, Any]:
     if agent_id not in {"agent-a", "agent-b"}:
@@ -456,7 +522,13 @@ def dispatch_messages(
         fail("--limit must be between 1 and 100")
     if timeout < 1:
         fail("--timeout must be positive")
-    fetch_result = fetch_and_store_messages(target_channel, state_path, limit=100, dry_run=dry_run)
+    fetch_result = fetch_and_store_messages(
+        target_channel,
+        state_path,
+        limit=100,
+        dry_run=dry_run,
+        natural_language=natural_language,
+    )
     state = load_state(state_path)
     channel_state = state["channels"].get(target_channel)
     if not isinstance(channel_state, dict):
@@ -539,6 +611,7 @@ def run_worker(
     timeout: int,
     interval: float,
     once: bool,
+    natural_language: bool,
 ) -> None:
     if interval <= 0:
         fail("--interval must be positive")
@@ -552,6 +625,7 @@ def run_worker(
                 handler,
                 timeout,
                 False,
+                natural_language=natural_language,
                 emit=False,
             )
             print(json.dumps(result, indent=2), flush=True)
@@ -681,6 +755,29 @@ def self_test() -> None:
             fail("self-test did not persist the cursor")
         if len(state["channels"]["123"]["inbox"]) != 1:
             fail("self-test did not queue the accepted message")
+        natural_message = {
+            "id": "104",
+            "channel_id": "123",
+            "author": {"id": "789", "bot": False},
+            "timestamp": "2026-08-11T00:00:00Z",
+            "content": "Agent B, inspect the worker and report back in plain English.",
+        }
+        natural_state = empty_state()
+        natural_result, natural_state = consume_messages(
+            "123", [natural_message], natural_state, natural_language=True
+        )
+        natural_record = natural_state["channels"]["123"]["inbox"][0]
+        if len(natural_result["messages"]) != 1:
+            fail("self-test did not convert a human message into a task")
+        if natural_record["payload"]["target"] != "agent-b":
+            fail("self-test did not route a natural-language Agent B request")
+        if natural_record["payload"]["source"]["request_text"] != natural_message["content"]:
+            fail("self-test did not preserve the original human request")
+        rendered_payload, rendered_error = parse_structured_message(
+            {"content": discord_content(natural_record["payload"])}
+        )
+        if rendered_error or rendered_payload != natural_record["payload"]:
+            fail("self-test did not round-trip rendered protocol JSON")
         ack = build_ack(valid, "agent-b")
         if ack["kind"] != "ack" or ack["ack_for"] != valid["message_id"]:
             fail("self-test did not build a matching acknowledgement")
@@ -733,7 +830,7 @@ def self_test() -> None:
                 return {"mode": "dispatch", "messages": [], "failures": []}
 
             globals()["dispatch_messages"] = fake_dispatch
-            run_worker("123", "agent-b", state_path, 1, ["python"], 1, 0.01, True)
+            run_worker("123", "agent-b", state_path, 1, ["python"], 1, 0.01, True, False)
         finally:
             globals()["dispatch_messages"] = original_dispatch
         if len(worker_calls) != 1 or worker_calls[0]["kwargs"].get("emit") is not False:
@@ -842,6 +939,7 @@ def main() -> int:
     poll_parser.add_argument("--channel-id")
     poll_parser.add_argument("--state-file", default=".collabctl-state.json")
     poll_parser.add_argument("--limit", type=int, default=100)
+    poll_parser.add_argument("--natural-language", action="store_true")
     poll_parser.add_argument("--dry-run", action="store_true")
 
     dispatch_parser = subparsers.add_parser("dispatch")
@@ -850,6 +948,7 @@ def main() -> int:
     dispatch_parser.add_argument("--state-file", default=".collabctl-state.json")
     dispatch_parser.add_argument("--limit", type=int, default=1)
     dispatch_parser.add_argument("--timeout", type=int, default=60)
+    dispatch_parser.add_argument("--natural-language", action="store_true")
     dispatch_parser.add_argument("--handler", nargs=argparse.REMAINDER, help="agent command and arguments; place this option last")
     dispatch_parser.add_argument("--dry-run", action="store_true")
 
@@ -861,6 +960,7 @@ def main() -> int:
     worker_parser.add_argument("--timeout", type=int, default=60)
     worker_parser.add_argument("--interval", type=float, default=5.0)
     worker_parser.add_argument("--once", action="store_true", help="poll and dispatch once, then exit")
+    worker_parser.add_argument("--natural-language", action="store_true", help="turn human plain-English messages into task envelopes")
     worker_parser.add_argument("--handler", nargs=argparse.REMAINDER, required=True, help="agent command and arguments; place this option last")
 
     ack_parser = subparsers.add_parser("ack")
@@ -894,7 +994,13 @@ def main() -> int:
         elif args.command == "read":
             read_messages(channel_id(args.channel_id), args.after, args.dry_run)
         elif args.command == "poll":
-            poll_messages(channel_id(args.channel_id), args.state_file, args.limit, args.dry_run)
+            poll_messages(
+                channel_id(args.channel_id),
+                args.state_file,
+                args.limit,
+                args.dry_run,
+                args.natural_language,
+            )
         elif args.command == "dispatch":
             dispatch_messages(
                 channel_id(args.channel_id),
@@ -904,6 +1010,7 @@ def main() -> int:
                 args.handler,
                 args.timeout,
                 args.dry_run,
+                args.natural_language,
             )
         elif args.command == "worker":
             run_worker(
@@ -915,6 +1022,7 @@ def main() -> int:
                 args.timeout,
                 args.interval,
                 args.once,
+                args.natural_language,
             )
         elif args.command == "ack":
             acknowledge_message(

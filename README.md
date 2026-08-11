@@ -16,9 +16,10 @@ those tasks.
 ## Current status
 
 Documentation plus a dependency-free HTTPS messaging CLI, a local Codex runtime
-bridge, and an optional polling worker. The worker can keep a local agent awake
-by polling Discord and dispatching addressed messages; it is not a Discord
-Gateway service and repository writes remain explicitly controlled.
+bridge, and an optional polling worker with a natural-language front end. The
+worker can keep a local agent awake by polling Discord and dispatching addressed
+messages; it is not a Discord Gateway service and repository writes remain
+explicitly controlled.
 
 ## Read in order
 
@@ -140,6 +141,33 @@ The handler receives `COLLAB_AGENT_ID` from the dispatcher. Use the Unity
 checkout as `--workdir` only after a separate branch/worktree and edit policy
 are ready. `workspace-write` is supported but intentionally not the default.
 
+## Natural-language front end
+
+The machine protocol remains JSON, but the worker can convert plain human
+messages into task envelopes and render agent responses as readable Discord
+messages. The original request, correlation IDs, routing, and reply links stay
+in the protocol JSON inside a Discord spoiler for audit and agent parsing.
+
+Enable this mode on the worker with `--natural-language`:
+
+```powershell
+python .\collabctl.py worker `
+  --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\CROSS-MACHINE-B.json' `
+  --natural-language `
+  --handler python .\codex_runtime.py `
+    --workdir C:\Users\bevadmin\GameAgentCollab `
+    --sandbox read-only `
+    --reply-target agent-a
+```
+
+Plain human messages mentioning `Agent A` or `Agent B` route to that agent;
+messages without one agent name route to `both-agents`. Plain JSON still must
+use a fenced `json` block. Bot-authored messages continue to require the
+protocol JSON so agents do not accidentally treat rendered responses as new
+human tasks.
+
 ## Always-on agent worker
 
 Run the worker on the machine hosting the agent. It polls the thread every five
@@ -151,6 +179,7 @@ python .\collabctl.py worker `
   --agent-id agent-b `
   --channel-id <thread-channel-id> `
   --state-file '.\state\CROSS-MACHINE-B.json' `
+  --natural-language `
   --handler python .\codex_runtime.py `
     --workdir C:\Users\bevadmin\GameAgentCollab `
     --sandbox read-only `
