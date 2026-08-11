@@ -55,13 +55,43 @@ human-action-required events. Keep this channel low-volume and actionable.
 
 ## Permission model
 
-| Role | Read | Send | Control actions | Manage server | Delete history |
-|---|---:|---:|---:|---:|---:|
-| Owner | all | all | yes | yes | yes |
-| Collaborator | all | all | yes, within granted scope | no | no |
-| Agent A/B | all collaboration channels | yes | task messages only | no | no |
-| Coordination Bot | all collaboration channels | structured events | bot-defined commands only | no | no |
-| Observer | all | optional discussion | no | no | no |
+Set these at the `COLLABORATION` category level, then sync the child channels:
+
+| Permission | @everyone | Owner | Collaborator | Agent A/B | Coordination Bot | Observer |
+|---|---:|---:|---:|---:|---:|---:|
+| View Channel | deny | allow | allow | allow | allow | allow |
+| Read Message History | deny | allow | allow | allow | allow | allow |
+| Send Messages | deny | allow | allow | allow | allow | deny |
+| Send Messages in Threads | deny | allow | allow | allow | allow | deny |
+| Create Public Threads/Posts | deny | allow | allow | allow | allow | deny |
+| Create Private Threads | deny | allow | deny | deny | deny | deny |
+| Add Reactions | deny | allow | allow | allow | allow | deny |
+| Embed Links | deny | allow | allow | allow | allow | deny |
+| Attach Files | deny | allow | allow | allow | allow | deny |
+| Use Application Commands | deny | allow | allow | allow | allow | deny |
+| Manage Threads | deny | allow | allow | deny | only if required | deny |
+| Manage Messages | deny | allow | allow | deny | deny initially | deny |
+| Manage Channels | deny | no extra grant | deny | deny | deny | deny |
+| Manage Permissions | deny | no extra grant | deny | deny | deny | deny |
+| Manage Server/Administrator | deny | owner only | deny | deny | deny | deny |
+| Mention @everyone/@here/all roles | deny | deny initially | deny | deny | deny | deny |
+
+The server owner already has owner authority. Do not grant `Administrator` to a
+bot or agent. If the bot must archive or lock completed task threads, grant it
+`Manage Threads` only; do not grant `Manage Messages` or `Manage Channels`.
+
+## Channel-specific overrides
+
+- `#welcome-and-rules`: agents, bot, and observers can read only. Owner and
+  Collaborator can post, attach, pin, and maintain reference messages.
+- `#control-room`: Owner, Collaborator, and bot can post. Agents can read but
+  should request control actions through task threads until command handling is
+  implemented.
+- `#tasks`: agents can create public posts/threads and reply. Humans can manage
+  threads. Use one task post/thread per task.
+- `#handoffs`: agents and bot can post; humans can review and manage threads.
+- `#alerts`: agents and bot can post actionable blockers; humans can review and
+  manage threads. Keep casual discussion elsewhere.
 
 Humans should be able to read every agent conversation. Do not create hidden
 agent channels in the first version; transparency is more valuable than
