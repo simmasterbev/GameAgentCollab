@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -447,7 +448,8 @@ def dispatch_messages(
     handler: list[str] | None,
     timeout: int,
     dry_run: bool,
-) -> None:
+    emit: bool = True,
+) -> dict[str, Any]:
     if agent_id not in {"agent-a", "agent-b"}:
         fail("--agent-id must be agent-a or agent-b")
     if not 1 <= limit <= 100:
@@ -516,13 +518,48 @@ def dispatch_messages(
             save_state(state_path, state)
     if not dry_run:
         save_state(state_path, state)
-    print(json.dumps({
+    result = {
         "mode": "dispatch",
         "agent_id": agent_id,
         "poll": fetch_result,
         "messages": dispatched,
         "failures": failures,
-    }, indent=2))
+    }
+    if emit:
+        print(json.dumps(result, indent=2))
+    return result
+
+
+def run_worker(
+    target_channel: str,
+    agent_id: str,
+    state_path: str,
+    limit: int,
+    handler: list[str],
+    timeout: int,
+    interval: float,
+    once: bool,
+) -> None:
+    if interval <= 0:
+        fail("--interval must be positive")
+    while True:
+        try:
+            result = dispatch_messages(
+                target_channel,
+                agent_id,
+                state_path,
+                limit,
+                handler,
+                timeout,
+                False,
+                emit=False,
+            )
+            print(json.dumps(result, indent=2), flush=True)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(json.dumps({"mode": "worker", "error": str(error)}), file=sys.stderr, flush=True)
+        if once:
+            return
+        time.sleep(interval)
 
 
 def post_payload(payload: dict[str, Any], target_channel: str, dry_run: bool) -> dict[str, Any] | None:
@@ -688,6 +725,19 @@ def self_test() -> None:
         broadcast_record["deliveries"]["agent-b"]["status"] = "acked"
         if len(pending_for_agent(dispatch_state["channels"]["123"], "agent-a")) != 1:
             fail("self-test suppressed Agent A after only Agent B acknowledged")
+        worker_calls: list[dict[str, Any]] = []
+        original_dispatch = dispatch_messages
+        try:
+            def fake_dispatch(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                worker_calls.append({"args": args, "kwargs": kwargs})
+                return {"mode": "dispatch", "messages": [], "failures": []}
+
+            globals()["dispatch_messages"] = fake_dispatch
+            run_worker("123", "agent-b", state_path, 1, ["python"], 1, 0.01, True)
+        finally:
+            globals()["dispatch_messages"] = original_dispatch
+        if len(worker_calls) != 1 or worker_calls[0]["kwargs"].get("emit") is not False:
+            fail("self-test did not run one worker dispatch cycle")
     print("self-test passed")
 
 
@@ -803,6 +853,16 @@ def main() -> int:
     dispatch_parser.add_argument("--handler", nargs=argparse.REMAINDER, help="agent command and arguments; place this option last")
     dispatch_parser.add_argument("--dry-run", action="store_true")
 
+    worker_parser = subparsers.add_parser("worker")
+    worker_parser.add_argument("--agent-id", required=True)
+    worker_parser.add_argument("--channel-id")
+    worker_parser.add_argument("--state-file", default=".collabctl-state.json")
+    worker_parser.add_argument("--limit", type=int, default=1)
+    worker_parser.add_argument("--timeout", type=int, default=60)
+    worker_parser.add_argument("--interval", type=float, default=5.0)
+    worker_parser.add_argument("--once", action="store_true", help="poll and dispatch once, then exit")
+    worker_parser.add_argument("--handler", nargs=argparse.REMAINDER, required=True, help="agent command and arguments; place this option last")
+
     ack_parser = subparsers.add_parser("ack")
     ack_parser.add_argument("discord_message_id")
     ack_parser.add_argument("--agent-id", required=True)
@@ -844,6 +904,17 @@ def main() -> int:
                 args.handler,
                 args.timeout,
                 args.dry_run,
+            )
+        elif args.command == "worker":
+            run_worker(
+                channel_id(args.channel_id),
+                args.agent_id,
+                args.state_file,
+                args.limit,
+                args.handler,
+                args.timeout,
+                args.interval,
+                args.once,
             )
         elif args.command == "ack":
             acknowledge_message(

@@ -9,9 +9,10 @@ Discord credentials, bot tokens, or private conversation transcripts.
 
 ## Current status
 
-Documentation plus a dependency-free HTTPS messaging CLI and an optional local
-Codex runtime bridge. No always-on Discord Gateway runtime or repository write
-automation has been built yet.
+Documentation plus a dependency-free HTTPS messaging CLI, a local Codex runtime
+bridge, and an optional polling worker. The worker can keep a local agent awake
+by polling Discord and dispatching addressed messages; it is not a Discord
+Gateway service and repository writes remain explicitly controlled.
 
 ## Read in order
 
@@ -132,6 +133,27 @@ python .\collabctl.py dispatch --agent-id agent-b `
 The handler receives `COLLAB_AGENT_ID` from the dispatcher. Use the Unity
 checkout as `--workdir` only after a separate branch/worktree and edit policy
 are ready. `workspace-write` is supported but intentionally not the default.
+
+## Always-on agent worker
+
+Run the worker on the machine hosting the agent. It polls the thread every five
+seconds, wakes the local handler for each addressed message, posts the handler's
+reply and acknowledgement, and keeps retryable failures in the state file:
+
+```powershell
+python .\collabctl.py worker `
+  --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\CROSS-MACHINE-B.json' `
+  --handler python .\codex_runtime.py `
+    --workdir C:\Users\bevadmin\GameAgentCollab `
+    --sandbox read-only `
+    --reply-target agent-a
+```
+
+Use `--once` for a single poll/dispatch cycle. Stop the continuous worker with
+Ctrl+C. This is polling-based rather than Gateway-based, so wake-up latency is
+the configured interval and the process must remain running.
 
 ## Core boundary
 
