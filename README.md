@@ -9,8 +9,8 @@ Discord credentials, bot tokens, or private conversation transcripts.
 
 ## Current status
 
-Documentation-only v0.1. No Discord server, bot runtime, agent connector, or
-repository automation has been built yet.
+Documentation plus a dependency-free HTTPS messaging CLI. No always-on Discord
+Gateway runtime or repository automation has been built yet.
 
 ## Read in order
 
@@ -19,6 +19,33 @@ repository automation has been built yet.
 3. `TASK_LIFECYCLE.md`
 4. `OWNERSHIP_RULES.md`
 5. `ACCEPTANCE_GATES.md`
+
+## Local messaging check
+
+```powershell
+python .\collabctl.py self-test
+python .\collabctl.py test-sequence
+```
+
+The second command validates and prints the supervised `GAME-TEST-001` message
+sequence without contacting Discord. For a live send, set
+`DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`, then use:
+
+```powershell
+python .\collabctl.py test-sequence --live
+```
+
+If `#tasks` is a Discord Forum channel, use its channel ID and let the CLI
+create the task post/thread:
+
+```powershell
+python .\collabctl.py test-sequence --live --channel-id <tasks-channel-id> --create-thread
+```
+
+The live mode currently posts messages to the configured channel. It does not
+The connector can create the first Forum task post when requested. It does not
+yet persist cursors, wake agent runtimes, or manage task state; those are later
+gates.
 
 ## Core boundary
 
