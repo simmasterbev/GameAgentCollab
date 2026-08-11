@@ -42,10 +42,20 @@ create the task post/thread:
 python .\collabctl.py test-sequence --live --channel-id <tasks-channel-id> --create-thread
 ```
 
-The live mode currently posts messages to the configured channel. It does not
-The connector can create the first Forum task post when requested. It does not
-yet persist cursors, wake agent runtimes, or manage task state; those are later
-gates.
+The live mode currently posts messages to the configured channel, and the
+connector can create the first Forum task post when requested. The `poll`
+command reads structured Discord messages, rejects malformed envelopes, removes
+duplicates by Discord message ID, and persists a per-channel cursor in the
+ignored `.collabctl-state.json` file:
+
+```powershell
+python .\collabctl.py poll --channel-id <channel-id>
+```
+
+Use `--dry-run` to inspect the poll request without contacting Discord. The
+current poll is a receive-and-record boundary: it does not yet wake agent
+runtimes, dispatch tasks, or provide an acknowledgement transaction if a
+downstream agent fails after polling. Those are later gates.
 
 ## Core boundary
 

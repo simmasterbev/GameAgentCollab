@@ -6,3 +6,4 @@ state/
 secrets/
 __pycache__/
 .venv/
+.collabctl-state.json

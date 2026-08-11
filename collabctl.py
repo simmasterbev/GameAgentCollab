@@ -6,12 +6,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime
+from pathlib import Path
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -42,6 +45,8 @@ TRANSITIONS = {
     "reject_delegation",
     "integrate_subtask",
 }
+STATE_VERSION = 1
+SEEN_MESSAGE_LIMIT = 512
 
 
 def fail(message: str) -> None:
@@ -196,6 +201,146 @@ def read_messages(target_channel: str, after: str | None, dry_run: bool) -> None
     print(json.dumps(request("GET", path), indent=2))
 
 
+def empty_state() -> dict[str, Any]:
+    return {"version": STATE_VERSION, "channels": {}}
+
+
+def load_state(path: str) -> dict[str, Any]:
+    state_path = Path(path)
+    if not state_path.exists():
+        return empty_state()
+    try:
+        with state_path.open(encoding="utf-8") as handle:
+            state = json.load(handle)
+    except json.JSONDecodeError as error:
+        fail(f"state file is not valid JSON: {error}")
+    if not isinstance(state, dict) or state.get("version") != STATE_VERSION:
+        fail(f"state file must use version {STATE_VERSION}")
+    if not isinstance(state.get("channels"), dict):
+        fail("state file channels must be an object")
+    return state
+
+
+def save_state(path: str, state: dict[str, Any]) -> None:
+    state_path = Path(path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{state_path.name}.", suffix=".tmp", dir=state_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2)
+            handle.write("\n")
+        os.replace(temporary_name, state_path)
+    except OSError:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
+def message_number(message_id: str) -> int:
+    if not str(message_id).isdigit():
+        fail(f"Discord message ID is not numeric: {message_id}")
+    return int(message_id)
+
+
+def parse_structured_message(message: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    content = message.get("content")
+    if not isinstance(content, str):
+        return None, None
+    match = re.fullmatch(r"\s*```json\s*(.*?)\s*```\s*", content, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None, None
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError as error:
+        return None, f"invalid JSON: {error.msg}"
+    if not isinstance(payload, dict):
+        return None, "payload must be a JSON object"
+    try:
+        return validate(payload), None
+    except ValueError as error:
+        return None, str(error)
+
+
+def consume_messages(
+    target_channel: str, raw_messages: list[dict[str, Any]], state: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    channel_state = state["channels"].setdefault(
+        target_channel, {"last_message_id": None, "seen_message_ids": []}
+    )
+    if not isinstance(channel_state, dict):
+        fail(f"state for channel {target_channel} must be an object")
+    seen = {str(item) for item in channel_state.get("seen_message_ids", [])}
+    last_message_id = channel_state.get("last_message_id")
+    if last_message_id is not None:
+        message_number(str(last_message_id))
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    newest = message_number(str(last_message_id)) if last_message_id is not None else None
+
+    ordered = sorted(raw_messages, key=lambda item: message_number(str(item.get("id", ""))))
+    for message in ordered:
+        message_id = str(message.get("id", ""))
+        current_number = message_number(message_id)
+        if message_id in seen or (newest is not None and current_number <= newest):
+            continue
+        seen.add(message_id)
+        newest = max(newest or current_number, current_number)
+        payload, error = parse_structured_message(message)
+        if error:
+            rejected.append({"discord_message_id": message_id, "error": error})
+            continue
+        if payload is None:
+            continue
+        author = message.get("author") if isinstance(message.get("author"), dict) else {}
+        accepted.append(
+            {
+                "discord_message_id": message_id,
+                "channel_id": str(message.get("channel_id", target_channel)),
+                "author_id": str(author.get("id", "")),
+                "author_bot": bool(author.get("bot", False)),
+                "created_at": message.get("timestamp"),
+                "payload": payload,
+            }
+        )
+
+    seen_ids = sorted(seen, key=message_number)[-SEEN_MESSAGE_LIMIT:]
+    channel_state["seen_message_ids"] = seen_ids
+    if newest is not None:
+        channel_state["last_message_id"] = str(newest)
+    result = {
+        "channel_id": target_channel,
+        "after": str(last_message_id) if last_message_id is not None else None,
+        "messages": accepted,
+        "rejected": rejected,
+    }
+    return result, state
+
+
+def poll_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> None:
+    if not 1 <= limit <= 100:
+        fail("--limit must be between 1 and 100")
+    state = load_state(state_path)
+    channel_state = state["channels"].get(target_channel, {})
+    after = channel_state.get("last_message_id") if isinstance(channel_state, dict) else None
+    query = {"limit": str(limit)}
+    if after:
+        query["after"] = str(after)
+    path = f"/channels/{target_channel}/messages?{urllib.parse.urlencode(query)}"
+    if dry_run:
+        print(json.dumps({"mode": "poll", "dry_run": True, "channel_id": target_channel, "after": after}, indent=2))
+        return
+    raw_messages = request("GET", path)
+    if not isinstance(raw_messages, list) or any(not isinstance(item, dict) for item in raw_messages):
+        fail("Discord messages response must be a list of objects")
+    result, updated_state = consume_messages(target_channel, raw_messages, state)
+    save_state(state_path, updated_state)
+    print(json.dumps(result, indent=2))
+
+
 def sample_payload(kind: str, sender: str, target: str, status: str, summary: str, task_id: str) -> dict[str, Any]:
     correlation = str(uuid.uuid4())
     return {
@@ -222,6 +367,27 @@ def self_test() -> None:
         pass
     else:
         fail("self-test accepted assist_request without transition")
+    with tempfile.TemporaryDirectory() as directory:
+        state_path = str(Path(directory) / "state.json")
+        state = empty_state()
+        message = {
+            "id": "100",
+            "channel_id": "123",
+            "author": {"id": "456", "bot": True},
+            "timestamp": "2026-08-11T00:00:00Z",
+            "content": discord_content(valid),
+        }
+        duplicate = dict(message)
+        invalid = dict(message, id="101", content="```json\n{not-json}\n```")
+        result, state = consume_messages("123", [duplicate, invalid, message], state)
+        if len(result["messages"]) != 1 or len(result["rejected"]) != 1:
+            fail("self-test did not separate accepted, duplicate, and rejected messages")
+        if state["channels"]["123"]["last_message_id"] != "101":
+            fail("self-test did not advance the cursor")
+        save_state(state_path, state)
+        restored = load_state(state_path)
+        if restored["channels"]["123"]["last_message_id"] != "101":
+            fail("self-test did not persist the cursor")
     print("self-test passed")
 
 
@@ -297,6 +463,12 @@ def main() -> int:
     read_parser.add_argument("--after")
     read_parser.add_argument("--dry-run", action="store_true")
 
+    poll_parser = subparsers.add_parser("poll")
+    poll_parser.add_argument("--channel-id")
+    poll_parser.add_argument("--state-file", default=".collabctl-state.json")
+    poll_parser.add_argument("--limit", type=int, default=100)
+    poll_parser.add_argument("--dry-run", action="store_true")
+
     sequence_parser = subparsers.add_parser("test-sequence")
     sequence_parser.add_argument("--live", action="store_true")
     sequence_parser.add_argument("--channel-id")
@@ -312,6 +484,8 @@ def main() -> int:
             send_payload(load_payload(args.payload), channel_id(args.channel_id), args.dry_run)
         elif args.command == "read":
             read_messages(channel_id(args.channel_id), args.after, args.dry_run)
+        elif args.command == "poll":
+            poll_messages(channel_id(args.channel_id), args.state_file, args.limit, args.dry_run)
         elif args.command == "test-sequence":
             test_sequence(not args.live, args.channel_id, args.create_thread)
         else:
