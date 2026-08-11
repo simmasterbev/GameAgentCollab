@@ -14,12 +14,13 @@ message_id: UUID created by the sender
 correlation_id: UUID shared by related messages
 task_id: stable task identifier
 kind: task | claim | progress | question | assist_request | delegation | pivot |
-  blocker | handoff | review | control
+  blocker | handoff | review | control | ack
 sender: agent-a | agent-b | human-owner | human-collaborator | coordination-bot
-target: agent-a | agent-b | humans | both-agents | all
+target: agent-a | agent-b | humans | coordination-bot | both-agents | all
 created_at: ISO-8601 UTC timestamp
 status: proposed | claimed | active | blocked | review | accepted | rejected | released
 summary: short human-readable message
+ack_for: UUID of the sender message being acknowledged (required for `ack`)
 ```
 
 ## Collaboration transitions
@@ -152,6 +153,10 @@ human_action_required: true | false
   it with `accept_delegation` or a human approves it.
 - Do not treat a message as authoritative until the sender identity and
   repository provenance have been checked.
+- An `ack` confirms that the target agent accepted delivery of the referenced
+  message. It does not by itself mean the task is complete or the requested
+  work passed review. For a message addressed to both agents, each agent must
+  acknowledge its own delivery.
 - Bound message size and field lengths; link to files or logs instead of
   copying large output into Discord.
 - Machine-control fields and human-readable summaries must describe the same

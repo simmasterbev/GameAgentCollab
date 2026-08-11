@@ -57,6 +57,47 @@ current poll is a receive-and-record boundary: it does not yet wake agent
 runtimes, dispatch tasks, or provide an acknowledgement transaction if a
 downstream agent fails after polling. Those are later gates.
 
+## Agent dispatch and acknowledgements
+
+The next boundary is a small subprocess adapter. `dispatch` polls, queues, and
+delivers pending messages addressed to one agent. Without a handler it prints
+the pending JSON job for an external runtime:
+
+```powershell
+python .\collabctl.py dispatch --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\GAME-TEST-001.json'
+```
+
+With `--handler`, the adapter sends one payload as JSON on stdin. The handler
+must return one validated `ack` envelope as JSON on stdout, with `sender`
+matching the selected agent and `ack_for` matching the incoming payload's
+`message_id`. Only after the acknowledgement posts successfully does the
+selected agent's delivery become `acked`; messages addressed to both agents
+track each agent's acknowledgement independently. Handler failures remain
+retryable:
+
+```powershell
+python .\collabctl.py dispatch --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\GAME-TEST-001.json' `
+  --handler python .\examples\ack_agent.py
+```
+
+An agent can acknowledge a queued message directly with its Discord message
+ID:
+
+```powershell
+python .\collabctl.py ack <discord-message-id> `
+  --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\GAME-TEST-001.json'
+```
+
+This is a delivery acknowledgement, not task completion or review approval.
+The current adapter does not yet invoke a real LLM/Codex worker or interpret
+its work; the handler contract is deliberately the narrow integration seam.
+
 ## Core boundary
 
 Discord is the visible coordination room. Git branches/worktrees, repository

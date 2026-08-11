@@ -13,7 +13,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
@@ -32,9 +33,10 @@ KINDS = {
     "handoff",
     "review",
     "control",
+    "ack",
 }
 SENDERS = {"agent-a", "agent-b", "human-owner", "human-collaborator", "coordination-bot"}
-TARGETS = {"agent-a", "agent-b", "humans", "both-agents", "all"}
+TARGETS = {"agent-a", "agent-b", "humans", "coordination-bot", "both-agents", "all"}
 STATUSES = {"proposed", "claimed", "active", "blocked", "review", "accepted", "rejected", "released"}
 TRANSITIONS = {
     "request_assistance",
@@ -109,6 +111,11 @@ def validate(payload: dict[str, Any]) -> dict[str, Any]:
             fail("transition.action is invalid")
         if not transition.get("parent_task_id"):
             fail("transition.parent_task_id is required")
+    if payload["kind"] == "ack":
+        try:
+            uuid.UUID(str(payload.get("ack_for")))
+        except (ValueError, AttributeError, TypeError):
+            fail("ack messages require ack_for as a UUID")
     return payload
 
 
@@ -165,12 +172,10 @@ def discord_content(payload: dict[str, Any]) -> str:
 
 
 def send_payload(payload: dict[str, Any], target_channel: str, dry_run: bool) -> None:
-    content = discord_content(payload)
-    body = {"content": content, "allowed_mentions": {"parse": []}}
     if dry_run:
         print(json.dumps({"mode": "send", "dry_run": True, "channel_id": target_channel, "payload": payload}, indent=2))
         return
-    print(json.dumps(request("POST", f"/channels/{target_channel}/messages", body), indent=2))
+    print(json.dumps(post_payload(payload, target_channel, False), indent=2))
 
 
 def create_forum_thread(payload: dict[str, Any], forum_channel: str, dry_run: bool) -> str | None:
@@ -265,14 +270,50 @@ def parse_structured_message(message: dict[str, Any]) -> tuple[dict[str, Any] | 
         return None, str(error)
 
 
+def now_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def inbox_entry(
+    discord_message_id: str,
+    channel_id_value: str,
+    author: dict[str, Any],
+    message: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    targets = payload.get("target")
+    delivery_agents = {targets} if targets in {"agent-a", "agent-b"} else {"agent-a", "agent-b"}
+    return {
+        "discord_message_id": discord_message_id,
+        "channel_id": channel_id_value,
+        "author_id": str(author.get("id", "")),
+        "author_bot": bool(author.get("bot", False)),
+        "created_at": message.get("timestamp"),
+        "payload": payload,
+        "deliveries": {
+            agent_id: {
+                "status": "pending",
+                "attempts": 0,
+                "last_attempt_at": None,
+                "last_error": None,
+                "ack_message_id": None,
+            }
+            for agent_id in sorted(delivery_agents)
+        },
+    }
+
+
 def consume_messages(
     target_channel: str, raw_messages: list[dict[str, Any]], state: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     channel_state = state["channels"].setdefault(
-        target_channel, {"last_message_id": None, "seen_message_ids": []}
+        target_channel, {"last_message_id": None, "seen_message_ids": [], "inbox": []}
     )
     if not isinstance(channel_state, dict):
         fail(f"state for channel {target_channel} must be an object")
+    channel_state.setdefault("inbox", [])
+    if not isinstance(channel_state["inbox"], list):
+        fail(f"state inbox for channel {target_channel} must be a list")
     seen = {str(item) for item in channel_state.get("seen_message_ids", [])}
     last_message_id = channel_state.get("last_message_id")
     if last_message_id is not None:
@@ -296,16 +337,9 @@ def consume_messages(
         if payload is None:
             continue
         author = message.get("author") if isinstance(message.get("author"), dict) else {}
-        accepted.append(
-            {
-                "discord_message_id": message_id,
-                "channel_id": str(message.get("channel_id", target_channel)),
-                "author_id": str(author.get("id", "")),
-                "author_bot": bool(author.get("bot", False)),
-                "created_at": message.get("timestamp"),
-                "payload": payload,
-            }
-        )
+        record = inbox_entry(message_id, str(message.get("channel_id", target_channel)), author, message, payload)
+        accepted.append({key: value for key, value in record.items() if key != "deliveries"})
+        channel_state["inbox"].append(record)
 
     seen_ids = sorted(seen, key=message_number)[-SEEN_MESSAGE_LIMIT:]
     channel_state["seen_message_ids"] = seen_ids
@@ -320,7 +354,7 @@ def consume_messages(
     return result, state
 
 
-def poll_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> None:
+def fetch_and_store_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> dict[str, Any]:
     if not 1 <= limit <= 100:
         fail("--limit must be between 1 and 100")
     state = load_state(state_path)
@@ -331,14 +365,186 @@ def poll_messages(target_channel: str, state_path: str, limit: int, dry_run: boo
         query["after"] = str(after)
     path = f"/channels/{target_channel}/messages?{urllib.parse.urlencode(query)}"
     if dry_run:
-        print(json.dumps({"mode": "poll", "dry_run": True, "channel_id": target_channel, "after": after}, indent=2))
-        return
+        return {"mode": "poll", "dry_run": True, "channel_id": target_channel, "after": after}
     raw_messages = request("GET", path)
     if not isinstance(raw_messages, list) or any(not isinstance(item, dict) for item in raw_messages):
         fail("Discord messages response must be a list of objects")
     result, updated_state = consume_messages(target_channel, raw_messages, state)
     save_state(state_path, updated_state)
+    return result
+
+
+def poll_messages(target_channel: str, state_path: str, limit: int, dry_run: bool) -> None:
+    result = fetch_and_store_messages(target_channel, state_path, limit, dry_run)
     print(json.dumps(result, indent=2))
+
+
+def agent_target(payload: dict[str, Any], agent_id: str) -> bool:
+    return payload.get("target") in {agent_id, "both-agents", "all"} and payload.get("sender") != agent_id
+
+
+def pending_for_agent(channel_state: dict[str, Any], agent_id: str) -> list[dict[str, Any]]:
+    inbox = channel_state.get("inbox", [])
+    return [
+        item for item in inbox
+        if isinstance(item, dict)
+        and isinstance(item.get("payload"), dict)
+        and item["payload"].get("kind") != "ack"
+        and isinstance(item.get("deliveries"), dict)
+        and isinstance(item["deliveries"].get(agent_id), dict)
+        and item["deliveries"][agent_id].get("status") == "pending"
+        and agent_target(item["payload"], agent_id)
+    ]
+
+
+def dispatch_messages(
+    target_channel: str,
+    agent_id: str,
+    state_path: str,
+    limit: int,
+    handler: list[str] | None,
+    timeout: int,
+    dry_run: bool,
+) -> None:
+    if agent_id not in {"agent-a", "agent-b"}:
+        fail("--agent-id must be agent-a or agent-b")
+    if not 1 <= limit <= 100:
+        fail("--limit must be between 1 and 100")
+    if timeout < 1:
+        fail("--timeout must be positive")
+    fetch_result = fetch_and_store_messages(target_channel, state_path, limit=100, dry_run=dry_run)
+    state = load_state(state_path)
+    channel_state = state["channels"].get(target_channel)
+    if not isinstance(channel_state, dict):
+        fail(f"no state exists for channel {target_channel}")
+    selected = pending_for_agent(channel_state, agent_id)[:limit]
+    dispatched: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for item in selected:
+        delivery = item["deliveries"][agent_id]
+        delivery["attempts"] = int(delivery.get("attempts", 0)) + 1
+        delivery["last_attempt_at"] = now_utc()
+        delivery["last_error"] = None
+        if handler is None or dry_run:
+            dispatched.append(item)
+            continue
+        try:
+            handler_environment = os.environ.copy()
+            handler_environment["COLLAB_AGENT_ID"] = agent_id
+            completed = subprocess.run(
+                handler,
+                input=json.dumps(item["payload"]) + "\n",
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=handler_environment,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            delivery["last_error"] = str(error)
+            failures.append({"discord_message_id": item["discord_message_id"], "error": str(error)})
+            continue
+        if completed.returncode != 0:
+            delivery["last_error"] = f"handler exited with code {completed.returncode}: {completed.stderr.strip()[:300]}"
+            failures.append({"discord_message_id": item["discord_message_id"], "error": delivery["last_error"]})
+            continue
+        try:
+            response_payload = json.loads(completed.stdout)
+            if not isinstance(response_payload, dict):
+                fail("handler output must be a JSON object")
+            validate(response_payload)
+            if response_payload.get("sender") != agent_id:
+                fail("handler response sender does not match --agent-id")
+            if response_payload.get("kind") != "ack":
+                fail("handler response must be an ack message")
+            if response_payload.get("ack_for") != item["payload"].get("message_id"):
+                fail("handler ack_for does not match the dispatched payload")
+            response = post_payload(response_payload, target_channel, False)
+            delivery["status"] = "acked"
+            delivery["ack_message_id"] = str(response["id"])
+            dispatched.append(item)
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as error:
+            delivery["last_error"] = str(error)
+            failures.append({"discord_message_id": item["discord_message_id"], "error": str(error)})
+    if not dry_run:
+        save_state(state_path, state)
+    print(json.dumps({
+        "mode": "dispatch",
+        "agent_id": agent_id,
+        "poll": fetch_result,
+        "messages": dispatched,
+        "failures": failures,
+    }, indent=2))
+
+
+def post_payload(payload: dict[str, Any], target_channel: str, dry_run: bool) -> dict[str, Any] | None:
+    content = discord_content(payload)
+    body = {"content": content, "allowed_mentions": {"parse": []}}
+    if dry_run:
+        return None
+    response = request("POST", f"/channels/{target_channel}/messages", body)
+    return response if isinstance(response, dict) else None
+
+
+def build_ack(payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
+    if agent_id not in {"agent-a", "agent-b"}:
+        fail("agent ID must be agent-a or agent-b")
+    ack = {
+        "schema_version": "0.2",
+        "message_id": str(uuid.uuid4()),
+        "correlation_id": payload["correlation_id"],
+        "task_id": payload["task_id"],
+        "kind": "ack",
+        "sender": agent_id,
+        "target": "coordination-bot",
+        "created_at": now_utc(),
+        "status": "accepted",
+        "summary": f"{agent_id} acknowledged delivery of {payload['kind']}.",
+        "ack_for": payload["message_id"],
+    }
+    return validate(ack)
+
+
+def acknowledge_message(
+    target_channel: str,
+    discord_message_id: str,
+    agent_id: str,
+    state_path: str,
+    dry_run: bool,
+) -> None:
+    state = load_state(state_path)
+    channel_state = state["channels"].get(target_channel)
+    if not isinstance(channel_state, dict) or not isinstance(channel_state.get("inbox"), list):
+        fail(f"no inbox exists for channel {target_channel}")
+    record = next(
+        (item for item in channel_state["inbox"]
+         if isinstance(item, dict) and item.get("discord_message_id") == discord_message_id),
+        None,
+    )
+    if record is None:
+        fail(f"no queued message found for Discord message ID {discord_message_id}")
+    deliveries = record.get("deliveries")
+    if not isinstance(deliveries, dict) or not isinstance(deliveries.get(agent_id), dict):
+        fail(f"message {discord_message_id} is not addressed to {agent_id}")
+    delivery = deliveries[agent_id]
+    if delivery.get("status") == "acked":
+        print(json.dumps({"mode": "ack", "already_acked": True, "record": record}, indent=2))
+        return
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        fail("queued message payload is invalid")
+    ack = build_ack(payload, agent_id)
+    if dry_run:
+        print(json.dumps({"mode": "ack", "dry_run": True, "channel_id": target_channel, "payload": ack}, indent=2))
+        return
+    response = post_payload(ack, target_channel, False)
+    if not isinstance(response, dict) or not response.get("id"):
+        fail("Discord did not return an acknowledgement message")
+    delivery["status"] = "acked"
+    delivery["ack_message_id"] = str(response["id"])
+    delivery["last_error"] = None
+    save_state(state_path, state)
+    print(json.dumps({"mode": "ack", "message": response, "record": record}, indent=2))
 
 
 def sample_payload(kind: str, sender: str, target: str, status: str, summary: str, task_id: str) -> dict[str, Any]:
@@ -388,6 +594,46 @@ def self_test() -> None:
         restored = load_state(state_path)
         if restored["channels"]["123"]["last_message_id"] != "101":
             fail("self-test did not persist the cursor")
+        if len(state["channels"]["123"]["inbox"]) != 1:
+            fail("self-test did not queue the accepted message")
+        ack = build_ack(valid, "agent-b")
+        if ack["kind"] != "ack" or ack["ack_for"] != valid["message_id"]:
+            fail("self-test did not build a matching acknowledgement")
+        handler = Path(__file__).parent / "examples" / "ack_agent.py"
+        completed = subprocess.run(
+            [sys.executable, str(handler)],
+            input=json.dumps(valid) + "\n",
+            capture_output=True,
+            text=True,
+            env={**os.environ, "COLLAB_AGENT_ID": "agent-b"},
+            check=False,
+        )
+        if completed.returncode != 0:
+            fail(f"self-test handler failed: {completed.stderr.strip()}")
+        handler_ack = json.loads(completed.stdout)
+        validate(handler_ack)
+        if handler_ack["sender"] != "agent-b" or handler_ack["ack_for"] != valid["message_id"]:
+            fail("self-test handler returned the wrong acknowledgement")
+        targeted = sample_payload("question", "agent-a", "agent-b", "active", "Can Agent B review this?", "GAME-TEST-002")
+        targeted_message = {
+            "id": "102",
+            "channel_id": "123",
+            "author": {"id": "456", "bot": True},
+            "timestamp": "2026-08-11T00:00:00Z",
+            "content": discord_content(targeted),
+        }
+        dispatch_state = empty_state()
+        consume_messages("123", [targeted_message], dispatch_state)
+        pending = pending_for_agent(dispatch_state["channels"]["123"], "agent-b")
+        if len(pending) != 1 or pending[0]["payload"]["message_id"] != targeted["message_id"]:
+            fail("self-test did not select a targeted pending message")
+        broadcast = sample_payload("task", "human-owner", "both-agents", "proposed", "Both agents should see this.", "GAME-TEST-003")
+        broadcast_message = dict(targeted_message, id="103", content=discord_content(broadcast))
+        consume_messages("123", [broadcast_message], dispatch_state)
+        broadcast_record = dispatch_state["channels"]["123"]["inbox"][-1]
+        broadcast_record["deliveries"]["agent-b"]["status"] = "acked"
+        if len(pending_for_agent(dispatch_state["channels"]["123"], "agent-a")) != 1:
+            fail("self-test suppressed Agent A after only Agent B acknowledged")
     print("self-test passed")
 
 
@@ -469,6 +715,22 @@ def main() -> int:
     poll_parser.add_argument("--limit", type=int, default=100)
     poll_parser.add_argument("--dry-run", action="store_true")
 
+    dispatch_parser = subparsers.add_parser("dispatch")
+    dispatch_parser.add_argument("--agent-id", required=True)
+    dispatch_parser.add_argument("--channel-id")
+    dispatch_parser.add_argument("--state-file", default=".collabctl-state.json")
+    dispatch_parser.add_argument("--limit", type=int, default=1)
+    dispatch_parser.add_argument("--timeout", type=int, default=60)
+    dispatch_parser.add_argument("--handler", nargs="+", help="agent command; place this option last")
+    dispatch_parser.add_argument("--dry-run", action="store_true")
+
+    ack_parser = subparsers.add_parser("ack")
+    ack_parser.add_argument("discord_message_id")
+    ack_parser.add_argument("--agent-id", required=True)
+    ack_parser.add_argument("--channel-id")
+    ack_parser.add_argument("--state-file", default=".collabctl-state.json")
+    ack_parser.add_argument("--dry-run", action="store_true")
+
     sequence_parser = subparsers.add_parser("test-sequence")
     sequence_parser.add_argument("--live", action="store_true")
     sequence_parser.add_argument("--channel-id")
@@ -486,6 +748,24 @@ def main() -> int:
             read_messages(channel_id(args.channel_id), args.after, args.dry_run)
         elif args.command == "poll":
             poll_messages(channel_id(args.channel_id), args.state_file, args.limit, args.dry_run)
+        elif args.command == "dispatch":
+            dispatch_messages(
+                channel_id(args.channel_id),
+                args.agent_id,
+                args.state_file,
+                args.limit,
+                args.handler,
+                args.timeout,
+                args.dry_run,
+            )
+        elif args.command == "ack":
+            acknowledge_message(
+                channel_id(args.channel_id),
+                args.discord_message_id,
+                args.agent_id,
+                args.state_file,
+                args.dry_run,
+            )
         elif args.command == "test-sequence":
             test_sequence(not args.live, args.channel_id, args.create_thread)
         else:
