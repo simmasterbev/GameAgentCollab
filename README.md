@@ -52,6 +52,17 @@ python .\collabctl.py test-sequence --live `
   --task-id CROSS-MACHINE-001
 ```
 
+For a clean conversation test with only one initial task, create a single
+Forum post instead of the full demo sequence:
+
+```powershell
+python .\collabctl.py create-task --live `
+  --channel-id <tasks-channel-id> `
+  --create-thread `
+  --task-id CROSS-MACHINE-001 `
+  --summary "Desktop Agent A and BevBot001 Agent B should confirm a Discord conversation."
+```
+
 The live mode currently posts messages to the configured channel, and the
 connector can create the first Forum task post when requested. The `poll`
 command reads structured Discord messages, rejects malformed envelopes, removes

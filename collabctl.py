@@ -750,6 +750,27 @@ def test_sequence(
         send_payload(message, destination, False)
 
 
+def create_task(
+    dry_run: bool,
+    target_channel: str | None,
+    create_thread: bool,
+    task_id: str,
+    summary: str,
+) -> None:
+    if not task_id.strip() or not summary.strip():
+        fail("--task-id and --summary must not be empty")
+    task = sample_payload("task", "human-owner", "both-agents", "proposed", summary, task_id)
+    validate(task)
+    if dry_run:
+        print(json.dumps(task, indent=2))
+        return
+    destination = channel_id(target_channel)
+    if create_thread:
+        create_forum_thread(task, destination, False)
+    else:
+        send_payload(task, destination, False)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -795,6 +816,13 @@ def main() -> int:
     sequence_parser.add_argument("--create-thread", action="store_true", help="create the first message as a Forum post")
     sequence_parser.add_argument("--task-id", default="GAME-TEST-001")
 
+    task_parser = subparsers.add_parser("create-task")
+    task_parser.add_argument("--live", action="store_true")
+    task_parser.add_argument("--channel-id")
+    task_parser.add_argument("--create-thread", action="store_true")
+    task_parser.add_argument("--task-id", required=True)
+    task_parser.add_argument("--summary", required=True)
+
     subparsers.add_parser("self-test")
     args = parser.parse_args()
     try:
@@ -827,6 +855,8 @@ def main() -> int:
             )
         elif args.command == "test-sequence":
             test_sequence(not args.live, args.channel_id, args.create_thread, args.task_id)
+        elif args.command == "create-task":
+            create_task(not args.live, args.channel_id, args.create_thread, args.task_id, args.summary)
         else:
             self_test()
     except (OSError, ValueError, json.JSONDecodeError) as error:
