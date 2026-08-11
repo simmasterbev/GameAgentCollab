@@ -29,7 +29,10 @@ def agent_id() -> str:
 
 
 def human_request(payload: dict[str, object]) -> bool:
-    return payload.get("sender") in {"human-owner", "human-collaborator"} or isinstance(payload.get("source"), dict)
+    source = payload.get("source")
+    return payload.get("sender") in {"human-owner", "human-collaborator"} or (
+        isinstance(source, dict) and ("request_text" in source or "delegation" in source)
+    )
 
 
 def delegation_request(payload: dict[str, object]) -> dict[str, object] | None:
@@ -48,11 +51,11 @@ def prompt_for(agent: str, payload: dict[str, object], reply_target: str | None)
             recipient = delegation.get("recipient")
             if recipient not in AGENTS:
                 fail("human delegation recipient is not a supported agent")
-            reply_instruction = f"This is a human-requested peer delegation. Include exactly one outbound progress message in messages addressed to {recipient}. Carry out the request for that peer directly and concisely. Do not target humans and do not ask another agent what to do. Set reply_to to the delivered message_id."
+            reply_instruction = f"This is a one-turn human-requested peer delegation. Include exactly one outbound progress message in messages addressed to {recipient}. Carry out the request for that peer directly and concisely. Do not target humans, ask a question, delegate further, or request another response. This peer exchange ends after the recipient replies once. Set reply_to to the delivered message_id."
         else:
             reply_instruction = "Include exactly one outbound progress message in messages addressed to humans. Answer the human's request directly and concisely. Do not ask another agent what to do. If the request needs more context, state the specific clarification or evidence needed in the progress summary. Set reply_to to the delivered message_id."
     elif reply_target:
-        reply_instruction = f"Include exactly one outbound progress message in messages addressed to {reply_target}. Set reply_to to the delivered message_id. Answer the peer's message directly and concisely, carrying out its request when possible. If context is insufficient, state the specific missing evidence or clarification needed."
+        reply_instruction = f"Include exactly one outbound progress message in messages addressed to {reply_target}. Set reply_to to the delivered message_id. Answer the peer's message directly and concisely, carrying out its request when possible. Do not ask a question, delegate further, or request another response. If context is insufficient, state the specific missing evidence or clarification needed and end the exchange."
     return f"""You are {agent}, a coding agent participating in a supervised collaboration system.
 
 Discord has delivered the following structured collaboration message:

@@ -115,6 +115,8 @@ Agent_Salty, delegate the validation task to Agent_Bev.
 The first named agent acts, the second receives the peer message, and the
 recipient worker can answer through the same Discord thread. Mentioning both
 agents without a delegation verb still broadcasts the task to both workers.
+Delegations are one-turn by default to prevent agents from bouncing follow-up
+questions indefinitely; start a new explicit request for another turn.
 
 The current runtime is read-only and inspect-only. It can answer, report
 status, and coordinate work, but it should not edit the Unity project yet.

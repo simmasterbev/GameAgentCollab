@@ -193,6 +193,10 @@ These become a task addressed to the acting agent with a recorded
 message, which wakes the recipient worker. If both names appear without a
 delegation pattern, the task remains a broadcast to `both-agents`.
 
+Peer delegations are one-turn exchanges by default: the recipient replies once,
+and the transport suppresses another automatic response for that exchange.
+Start a new explicit Discord request when more conversation is needed.
+
 ## Always-on agent worker
 
 Run the worker on the machine hosting the agent. It polls the thread every five

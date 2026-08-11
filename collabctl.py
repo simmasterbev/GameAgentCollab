@@ -402,6 +402,16 @@ def inbox_entry(
     }
 
 
+def terminal_delivery(payload: dict[str, Any], agent_id: str) -> bool:
+    source = payload.get("source")
+    exchange = source.get("peer_exchange") if isinstance(source, dict) else None
+    return (
+        isinstance(exchange, dict)
+        and exchange.get("terminal") is True
+        and exchange.get("terminal_for") == agent_id
+    )
+
+
 def consume_messages(
     target_channel: str,
     raw_messages: list[dict[str, Any]],
@@ -501,6 +511,7 @@ def pending_for_agent(channel_state: dict[str, Any], agent_id: str) -> list[dict
         and isinstance(item.get("deliveries"), dict)
         and isinstance(item["deliveries"].get(agent_id), dict)
         and item["deliveries"][agent_id].get("status") == "pending"
+        and not terminal_delivery(item["payload"], agent_id)
         and agent_target(item["payload"], agent_id)
     ]
 
@@ -538,6 +549,35 @@ def validate_runtime_response(
         if message.get("target") == "coordination-bot":
             fail("runtime outbound messages must target an agent or human")
     return {"ack": ack, "messages": messages}
+
+
+def add_peer_exchange_marker(message: dict[str, Any], incoming_payload: dict[str, Any]) -> dict[str, Any]:
+    incoming_source = incoming_payload.get("source")
+    delegation = incoming_source.get("delegation") if isinstance(incoming_source, dict) else None
+    exchange = incoming_source.get("peer_exchange") if isinstance(incoming_source, dict) else None
+    if isinstance(delegation, dict) and message.get("target") == delegation.get("recipient"):
+        message["source"] = {
+            "peer_exchange": {
+                "origin_message_id": incoming_payload["message_id"],
+                "terminal_after_reply": True,
+            }
+        }
+    elif isinstance(exchange, dict) and exchange.get("terminal_after_reply") is True:
+        message["source"] = {
+            "peer_exchange": {
+                "origin_message_id": exchange.get("origin_message_id"),
+                "terminal": True,
+                "terminal_for": message.get("target"),
+            }
+        }
+    elif incoming_payload.get("sender") in AGENTS and message.get("target") in AGENTS:
+        message["source"] = {
+            "peer_exchange": {
+                "origin_message_id": incoming_payload["message_id"],
+                "terminal_after_reply": True,
+            }
+        }
+    return message
 
 
 def dispatch_messages(
@@ -605,6 +645,7 @@ def dispatch_messages(
             for index, message in enumerate(runtime_response["messages"]):
                 if index < len(outbound_ids):
                     continue
+                add_peer_exchange_marker(message, item["payload"])
                 response = post_payload(message, target_channel, False)
                 if not isinstance(response, dict) or not response.get("id"):
                     fail("Discord did not return an outbound response message")
@@ -820,6 +861,18 @@ def self_test() -> None:
             fail("self-test did not route a peer delegation to the acting agent")
         if delegation_payload["source"]["delegation"]["recipient"] != AGENT_BEV:
             fail("self-test did not record the peer delegation recipient")
+        delegated_outbound = sample_payload(
+            "progress", AGENT_SALTY, AGENT_BEV, "active", "Here is the requested joke.", delegation_payload["task_id"]
+        )
+        delegated_outbound["reply_to"] = delegation_payload["message_id"]
+        add_peer_exchange_marker(delegated_outbound, delegation_payload)
+        terminal_reply = sample_payload(
+            "progress", AGENT_BEV, AGENT_SALTY, "accepted", "Joke received.", delegation_payload["task_id"]
+        )
+        terminal_reply["reply_to"] = delegated_outbound["message_id"]
+        add_peer_exchange_marker(terminal_reply, delegated_outbound)
+        if not terminal_delivery(terminal_reply, AGENT_SALTY):
+            fail("self-test did not mark the peer exchange terminal")
         rendered_payload, rendered_error = parse_structured_message(
             {"content": discord_content(natural_record["payload"])}
         )
