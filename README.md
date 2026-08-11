@@ -175,6 +175,24 @@ handoff behavior. Plain JSON still must use a fenced `json` block. Bot-authored
 messages continue to require the protocol JSON so agents do not accidentally
 treat rendered responses as new human tasks.
 
+Peer delegation patterns are also recognized. The first named agent is the
+acting agent and the second is the recipient when a delegation verb appears
+between them:
+
+```text
+Agent_Salty, tell Agent_Bev a joke.
+Agent_Bev, ask Agent_Salty to inspect the worker.
+Agent_Salty, send Agent_Bev the current status.
+Agent_Bev, assign Agent_Salty the presentation subtask.
+Agent_Salty, delegate the validation task to Agent_Bev.
+Agent_Bev, hand off the preview task to Agent_Salty.
+```
+
+These become a task addressed to the acting agent with a recorded
+`source.delegation` recipient. The acting agent sends the peer-targeted
+message, which wakes the recipient worker. If both names appear without a
+delegation pattern, the task remains a broadcast to `both-agents`.
+
 ## Always-on agent worker
 
 Run the worker on the machine hosting the agent. It polls the thread every five

@@ -279,17 +279,42 @@ def message_number(message_id: str) -> int:
     return int(message_id)
 
 
+def mentioned_agents(content: str) -> list[tuple[str, int, int]]:
+    mentions: list[tuple[str, int, int]] = []
+    pattern = re.compile(r"\bagent[_\s-]?(bev|salty|a|b)\b", re.IGNORECASE)
+    for match in pattern.finditer(content):
+        alias = match.group(1).lower()
+        agent = AGENT_BEV if alias in {"bev", "a"} else AGENT_SALTY
+        if not any(existing[0] == agent for existing in mentions):
+            mentions.append((agent, match.start(), match.end()))
+    return mentions
+
+
+def delegation_details(content: str, mentions: list[tuple[str, int, int]]) -> dict[str, str] | None:
+    if len(mentions) < 2:
+        return None
+    verb = re.search(r"\b(tell|ask|send|assign|delegate|handoff|hand\s+off|have)\b", content, re.IGNORECASE)
+    if not verb or not mentions[0][2] <= verb.start() <= mentions[1][1]:
+        return None
+    actor, _, _ = mentions[0]
+    recipient, _, _ = mentions[1]
+    if actor == recipient:
+        return None
+    return {
+        "actor": actor,
+        "recipient": recipient,
+        "verb": " ".join(verb.group(1).lower().split()),
+        "request_text": " ".join(content.split()),
+    }
+
+
 def natural_task_payload(message: dict[str, Any], content: str) -> dict[str, Any]:
     message_id = str(message.get("id", ""))
     if not message_id.isdigit():
         fail("natural-language messages require a numeric Discord message ID")
-    normalized = content.lower()
-    mentioned_agents = set()
-    if re.search(r"\bagent[_\s-]?(?:bev|a)\b", normalized):
-        mentioned_agents.add(AGENT_BEV)
-    if re.search(r"\bagent[_\s-]?(?:salty|b)\b", normalized):
-        mentioned_agents.add(AGENT_SALTY)
-    target = "both-agents" if len(mentioned_agents) != 1 else next(iter(mentioned_agents))
+    mentions = mentioned_agents(content)
+    delegation = delegation_details(content, mentions)
+    target = delegation["actor"] if delegation else (mentions[0][0] if len(mentions) == 1 else "both-agents")
     channel_value = str(message.get("channel_id", ""))
     payload = {
         "schema_version": "0.2",
@@ -308,6 +333,8 @@ def natural_task_payload(message: dict[str, Any], content: str) -> dict[str, Any
             "request_text": content.strip(),
         },
     }
+    if delegation:
+        payload["source"]["delegation"] = delegation
     return validate(payload)
 
 
@@ -781,6 +808,18 @@ def self_test() -> None:
             fail("self-test did not route a natural-language Agent_Salty request")
         if natural_record["payload"]["source"]["request_text"] != natural_message["content"]:
             fail("self-test did not preserve the original human request")
+        delegation_message = dict(
+            natural_message,
+            id="105",
+            content="Agent_Salty, tell Agent_Bev a joke.",
+        )
+        delegation_state = empty_state()
+        consume_messages("123", [delegation_message], delegation_state, natural_language=True)
+        delegation_payload = delegation_state["channels"]["123"]["inbox"][0]["payload"]
+        if delegation_payload["target"] != AGENT_SALTY:
+            fail("self-test did not route a peer delegation to the acting agent")
+        if delegation_payload["source"]["delegation"]["recipient"] != AGENT_BEV:
+            fail("self-test did not record the peer delegation recipient")
         rendered_payload, rendered_error = parse_structured_message(
             {"content": discord_content(natural_record["payload"])}
         )

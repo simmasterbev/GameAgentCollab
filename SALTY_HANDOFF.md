@@ -103,6 +103,19 @@ Agent_Salty should answer in readable language and include the protocol JSON aud
 payload underneath. A human message without an explicit agent name can be
 routed to both agents, so use `Agent_Salty` when only Salty's worker should act.
 
+Peer delegation is supported with patterns such as:
+
+```text
+Agent_Salty, tell Agent_Bev a joke.
+Agent_Salty, ask Agent_Bev to inspect the worker.
+Agent_Salty, send Agent_Bev the current status.
+Agent_Salty, delegate the validation task to Agent_Bev.
+```
+
+The first named agent acts, the second receives the peer message, and the
+recipient worker can answer through the same Discord thread. Mentioning both
+agents without a delegation verb still broadcasts the task to both workers.
+
 The current runtime is read-only and inspect-only. It can answer, report
 status, and coordinate work, but it should not edit the Unity project yet.
 
