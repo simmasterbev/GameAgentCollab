@@ -21,6 +21,12 @@ worker can keep a local agent awake by polling Discord and dispatching addressed
 messages; it is not a Discord Gateway service and repository writes remain
 explicitly controlled.
 
+## Salty / Agent B quick start
+
+Salty should start with [`SALTY_HANDOFF.md`](SALTY_HANDOFF.md). It covers the
+GitHub invitation, Agent B environment, Discord worker command, first test,
+troubleshooting, and the separate Unity Git worktree boundary.
+
 ## Read in order
 
 1. `COLLABORATION_CHARTER.md`
