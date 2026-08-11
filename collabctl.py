@@ -721,7 +721,7 @@ def main() -> int:
     dispatch_parser.add_argument("--state-file", default=".collabctl-state.json")
     dispatch_parser.add_argument("--limit", type=int, default=1)
     dispatch_parser.add_argument("--timeout", type=int, default=60)
-    dispatch_parser.add_argument("--handler", nargs="+", help="agent command; place this option last")
+    dispatch_parser.add_argument("--handler", nargs=argparse.REMAINDER, help="agent command and arguments; place this option last")
     dispatch_parser.add_argument("--dry-run", action="store_true")
 
     ack_parser = subparsers.add_parser("ack")
