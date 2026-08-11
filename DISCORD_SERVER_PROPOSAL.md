@@ -1,0 +1,111 @@
+# Discord server proposal
+
+Version: 0.1
+Status: proposed
+
+This is the smallest useful server shape for two coding agents, Bevin, and
+Salty. It is a collaboration and observation surface for the separate Game
+Agent Collaboration system; it is not a place to store game secrets or the
+source of truth for code.
+
+## Roles
+
+- `Owner` - Bevin; full server and project-control authority.
+- `Collaborator` - Salty; can assign, review, pause, and discuss work.
+- `Agent A` - first agent identity.
+- `Agent B` - second agent identity.
+- `Coordination Bot` - routes and records structured task events.
+- `Observer` - optional read-only access for future participants.
+
+Do not grant the bot or agents `Administrator`.
+
+## Channels
+
+Create one category named `COLLABORATION` with these channels:
+
+### `#welcome-and-rules`
+
+Pinned reference channel. Humans post the charter, message schema, ownership
+rules, and current repository links here. No secrets or private transcripts.
+
+### `#control-room`
+
+Human-visible task assignment and control actions:
+
+- create or reprioritize a task;
+- pause, resume, reassign, or cancel work;
+- approve a scope overlap or risky action;
+- request a status summary.
+
+### `#tasks`
+
+One Discord thread per task. The opening post contains the task ID, objective,
+acceptance gates, target agent, and relevant links. Claims, progress, questions,
+assist requests, and decisions stay in that task's thread.
+
+### `#handoffs`
+
+Completion and review messages only. Each handoff names the task, branch,
+commit, changed files, validation, risks, and next actions.
+
+### `#alerts`
+
+Blockers, overlapping claims, stale leases, failed validation, bot failures, and
+human-action-required events. Keep this channel low-volume and actionable.
+
+## Permission model
+
+| Role | Read | Send | Control actions | Manage server | Delete history |
+|---|---:|---:|---:|---:|---:|
+| Owner | all | all | yes | yes | yes |
+| Collaborator | all | all | yes, within granted scope | no | no |
+| Agent A/B | all collaboration channels | yes | task messages only | no | no |
+| Coordination Bot | all collaboration channels | structured events | bot-defined commands only | no | no |
+| Observer | all | optional discussion | no | no | no |
+
+Humans should be able to read every agent conversation. Do not create hidden
+agent channels in the first version; transparency is more valuable than
+simulating private agent memory.
+
+## Message conventions
+
+Readable text comes first, followed by the structured envelope or embed.
+
+Examples:
+
+```text
+TASK GAME-2026-001 - Add scenario preview validation
+CLAIM GAME-2026-001 - Agent A owns Simulation/** on agent-a/scenario-preview
+ASSIST GAME-2026-001 - Agent A requests Agent B take child GAME-2026-001-B
+ACCEPT GAME-2026-001-B - Agent B accepts Presentation/**
+BLOCK GAME-2026-001 - Unity compile is blocked by an unrelated dirty file
+HANDOFF GAME-2026-001-B - commit abc1234, tests 4/4, ready for integration
+APPROVE GAME-2026-001 - Bevin accepts the handoff for merge/review
+```
+
+The bot should assign or preserve a stable `message_id`, `task_id`, and
+`correlation_id` for every machine-relevant event. Human conversation can remain
+natural inside the task thread.
+
+## First supervised exercise
+
+Before connecting real agent runtimes:
+
+1. Create `GAME-TEST-001` in `#tasks`.
+2. Have Agent A claim a narrow fake scope.
+3. Have Agent A request child task `GAME-TEST-001-B` from Agent B.
+4. Have Agent B accept, post progress, and hand off.
+5. Have Bevin or Salty approve the handoff.
+6. Test a conflicting claim, a rejected delegation, a pause, and an expired
+   claim.
+7. Record the result in `#handoffs` and the companion repository.
+
+Do not grant repository write automation until this supervised exercise works.
+
+## Deliberate omissions
+
+- No general-purpose bot commands beyond task/control needs.
+- No private secret channel; secrets belong in an approved secret store.
+- No automatic conflict resolution.
+- No automatic agent-to-agent reply loop.
+- No Discord-to-Unity direct mutation path.
