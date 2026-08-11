@@ -691,8 +691,12 @@ def self_test() -> None:
     print("self-test passed")
 
 
-def test_sequence(dry_run: bool, target_channel: str | None, create_thread: bool) -> None:
-    task = "GAME-TEST-001"
+def test_sequence(
+    dry_run: bool, target_channel: str | None, create_thread: bool, task_id: str
+) -> None:
+    if not task_id.strip():
+        fail("--task-id must not be empty")
+    task = task_id
     correlation_id = str(uuid.uuid4())
     messages = [
         sample_payload("task", "human-owner", "both-agents", "proposed", "Run the supervised collaboration test.", task),
@@ -789,6 +793,7 @@ def main() -> int:
     sequence_parser.add_argument("--live", action="store_true")
     sequence_parser.add_argument("--channel-id")
     sequence_parser.add_argument("--create-thread", action="store_true", help="create the first message as a Forum post")
+    sequence_parser.add_argument("--task-id", default="GAME-TEST-001")
 
     subparsers.add_parser("self-test")
     args = parser.parse_args()
@@ -821,7 +826,7 @@ def main() -> int:
                 args.dry_run,
             )
         elif args.command == "test-sequence":
-            test_sequence(not args.live, args.channel_id, args.create_thread)
+            test_sequence(not args.live, args.channel_id, args.create_thread, args.task_id)
         else:
             self_test()
     except (OSError, ValueError, json.JSONDecodeError) as error:

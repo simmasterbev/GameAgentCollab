@@ -43,6 +43,15 @@ create the task post/thread:
 python .\collabctl.py test-sequence --live --channel-id <tasks-channel-id> --create-thread
 ```
 
+Use `--task-id` to create a fresh supervised thread for a new acceptance run:
+
+```powershell
+python .\collabctl.py test-sequence --live `
+  --channel-id <tasks-channel-id> `
+  --create-thread `
+  --task-id CROSS-MACHINE-001
+```
+
 The live mode currently posts messages to the configured channel, and the
 connector can create the first Forum task post when requested. The `poll`
 command reads structured Discord messages, rejects malformed envelopes, removes
