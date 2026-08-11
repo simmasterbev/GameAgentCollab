@@ -1,6 +1,6 @@
 # Task lifecycle
 
-Version: 0.1
+Version: 0.2
 Status: draft
 
 ## States
@@ -29,11 +29,38 @@ and `expired`.
 7. **Release** - The agent releases the scope claim after handoff, merge, or
    explicit abandonment.
 
+## Mid-task split and pivot
+
+The parent task does not have to stay linear. An agent may discover that a
+different part of the feature should be handled by the other agent.
+
+1. **Request assistance** - The current owner posts an `assist_request` naming
+   the parent task, proposed child task, remaining work, scope, dependency, and
+   reason. The parent owner keeps responsibility while waiting.
+2. **Accept or decline** - The target agent explicitly accepts or rejects the
+   child task. Silence is not acceptance.
+3. **Run in parallel or sequence** - After acceptance, the child task gets its
+   own claim, branch/worktree, and acceptance gates. The parent task records the
+   dependency and may continue on disjoint work.
+4. **Integrate** - The child owner posts a handoff with commit and validation.
+   The parent owner integrates or requests review, then closes the child task.
+5. **Transfer if needed** - If the whole remaining task should change owners,
+   the current owner posts a pivot/transfer proposal. Ownership changes only
+   after explicit acceptance or human approval.
+
+This records a pivot as a state transition rather than burying it in chat.
+
 ## No silent takeover
 
 An agent must not infer ownership from a message, branch name, or inactivity.
 Expired claims become `expired` and require a new claim. A human may force a
 release or reassignment, which the bot records as a control event.
+
+## Accountability rule
+
+Splitting work creates a parent/child task relationship. The parent owner stays
+accountable for the parent task's final integration unless a full transfer is
+accepted. A collaborator can own a child task without owning the feature.
 
 ## Minimum completion record
 
