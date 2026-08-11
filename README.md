@@ -7,6 +7,12 @@ This repository is intentionally separate from the Unity game repository at
 `F:\CellularAutomataGameDev`. It contains no Unity code, assets, package files,
 Discord credentials, bot tokens, or private conversation transcripts.
 
+Human-authored Discord tasks require the coordination application's
+`MESSAGE_CONTENT` privileged intent. Without it, Discord's REST message objects
+can expose an empty `content` field for user messages even though bot-authored
+messages remain readable; the structured-message parser will therefore ignore
+those tasks.
+
 ## Current status
 
 Documentation plus a dependency-free HTTPS messaging CLI, a local Codex runtime
