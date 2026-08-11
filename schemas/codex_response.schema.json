@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ack", "messages"],
+  "properties": {
+    "ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "message_id", "correlation_id", "task_id", "kind", "sender", "target", "created_at", "status", "summary", "ack_for"],
+      "properties": {
+        "schema_version": {"type": "string", "const": "0.2"},
+        "message_id": {"type": "string", "format": "uuid"},
+        "correlation_id": {"type": "string", "format": "uuid"},
+        "task_id": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "const": "ack"},
+        "sender": {"type": "string", "enum": ["agent-a", "agent-b"]},
+        "target": {"type": "string", "const": "coordination-bot"},
+        "created_at": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "const": "accepted"},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+        "ack_for": {"type": "string", "format": "uuid"}
+      }
+    },
+    "messages": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema_version", "message_id", "correlation_id", "task_id", "kind", "sender", "target", "created_at", "status", "summary", "reply_to"],
+        "properties": {
+          "schema_version": {"type": "string", "const": "0.2"},
+          "message_id": {"type": "string", "format": "uuid"},
+          "correlation_id": {"type": "string", "format": "uuid"},
+          "task_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "enum": ["progress", "question", "assist_request", "delegation", "pivot", "blocker", "handoff", "review", "control"]},
+          "sender": {"type": "string", "enum": ["agent-a", "agent-b"]},
+          "target": {"type": "string", "enum": ["agent-a", "agent-b", "humans", "both-agents", "all"]},
+          "created_at": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["proposed", "claimed", "active", "blocked", "review", "accepted", "rejected", "released"]},
+          "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+          "reply_to": {"type": "string", "format": "uuid"}
+        }
+      }
+    }
+  }
+}

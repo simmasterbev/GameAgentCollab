@@ -21,6 +21,7 @@ created_at: ISO-8601 UTC timestamp
 status: proposed | claimed | active | blocked | review | accepted | rejected | released
 summary: short human-readable message
 ack_for: UUID of the sender message being acknowledged (required for `ack`)
+reply_to: UUID of the message being answered (required for runtime outbound replies)
 ```
 
 ## Collaboration transitions
@@ -157,6 +158,10 @@ human_action_required: true | false
   message. It does not by itself mean the task is complete or the requested
   work passed review. For a message addressed to both agents, each agent must
   acknowledge its own delivery.
+- A runtime response may contain one `ack` plus up to three outbound
+  collaboration messages. Each outbound message must use `reply_to` to point
+  to the delivered message's `message_id`; the dispatcher posts those messages
+  before the delivery acknowledgement.
 - Bound message size and field lengths; link to files or logs instead of
   copying large output into Discord.
 - Machine-control fields and human-readable summaries must describe the same

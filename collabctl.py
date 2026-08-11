@@ -116,6 +116,11 @@ def validate(payload: dict[str, Any]) -> dict[str, Any]:
             uuid.UUID(str(payload.get("ack_for")))
         except (ValueError, AttributeError, TypeError):
             fail("ack messages require ack_for as a UUID")
+    if "reply_to" in payload:
+        try:
+            uuid.UUID(str(payload["reply_to"]))
+        except (ValueError, AttributeError, TypeError):
+            fail("reply_to must be a UUID")
     return payload
 
 
@@ -295,8 +300,10 @@ def inbox_entry(
                 "status": "pending",
                 "attempts": 0,
                 "last_attempt_at": None,
-                "last_error": None,
-                "ack_message_id": None,
+            "last_error": None,
+            "ack_message_id": None,
+            "runtime_response": None,
+            "outbound_message_ids": [],
             }
             for agent_id in sorted(delivery_agents)
         },
@@ -397,6 +404,41 @@ def pending_for_agent(channel_state: dict[str, Any], agent_id: str) -> list[dict
     ]
 
 
+def validate_runtime_response(
+    response: dict[str, Any], agent_id: str, incoming_payload: dict[str, Any]
+) -> dict[str, Any]:
+    if "ack" not in response:
+        response = {"ack": response, "messages": []}
+    if set(response) != {"ack", "messages"}:
+        fail("runtime response must contain only ack and messages")
+    ack = response["ack"]
+    messages = response["messages"]
+    if not isinstance(ack, dict):
+        fail("runtime response ack must be an object")
+    validate(ack)
+    if ack.get("sender") != agent_id:
+        fail("runtime acknowledgement sender does not match --agent-id")
+    if ack.get("kind") != "ack":
+        fail("runtime acknowledgement must have kind ack")
+    if ack.get("ack_for") != incoming_payload.get("message_id"):
+        fail("runtime acknowledgement ack_for does not match the dispatched payload")
+    if not isinstance(messages, list) or len(messages) > 3:
+        fail("runtime messages must be a list with at most 3 items")
+    for message in messages:
+        if not isinstance(message, dict):
+            fail("runtime outbound message must be an object")
+        validate(message)
+        if message.get("sender") != agent_id:
+            fail("runtime outbound sender does not match --agent-id")
+        if message.get("kind") == "ack":
+            fail("runtime outbound messages cannot be ack messages")
+        if message.get("reply_to") != incoming_payload.get("message_id"):
+            fail("runtime outbound reply_to does not match the dispatched payload")
+        if message.get("target") == "coordination-bot":
+            fail("runtime outbound messages must target an agent or human")
+    return {"ack": ack, "messages": messages}
+
+
 def dispatch_messages(
     target_channel: str,
     agent_id: str,
@@ -429,43 +471,49 @@ def dispatch_messages(
             dispatched.append(item)
             continue
         try:
-            handler_environment = os.environ.copy()
-            handler_environment["COLLAB_AGENT_ID"] = agent_id
-            completed = subprocess.run(
-                handler,
-                input=json.dumps(item["payload"]) + "\n",
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                env=handler_environment,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            delivery["last_error"] = str(error)
-            failures.append({"discord_message_id": item["discord_message_id"], "error": str(error)})
-            continue
-        if completed.returncode != 0:
-            delivery["last_error"] = f"handler exited with code {completed.returncode}: {completed.stderr.strip()[:300]}"
-            failures.append({"discord_message_id": item["discord_message_id"], "error": delivery["last_error"]})
-            continue
-        try:
-            response_payload = json.loads(completed.stdout)
-            if not isinstance(response_payload, dict):
-                fail("handler output must be a JSON object")
-            validate(response_payload)
-            if response_payload.get("sender") != agent_id:
-                fail("handler response sender does not match --agent-id")
-            if response_payload.get("kind") != "ack":
-                fail("handler response must be an ack message")
-            if response_payload.get("ack_for") != item["payload"].get("message_id"):
-                fail("handler ack_for does not match the dispatched payload")
-            response = post_payload(response_payload, target_channel, False)
+            runtime_response = delivery.get("runtime_response")
+            if runtime_response is None:
+                handler_environment = os.environ.copy()
+                handler_environment["COLLAB_AGENT_ID"] = agent_id
+                completed = subprocess.run(
+                    handler,
+                    input=json.dumps(item["payload"]) + "\n",
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                    env=handler_environment,
+                )
+                if completed.returncode != 0:
+                    fail(f"handler exited with code {completed.returncode}: {completed.stderr.strip()[:300]}")
+                response_payload = json.loads(completed.stdout)
+                if not isinstance(response_payload, dict):
+                    fail("handler output must be a JSON object")
+                runtime_response = validate_runtime_response(response_payload, agent_id, item["payload"])
+                delivery["runtime_response"] = runtime_response
+                save_state(state_path, state)
+            outbound_ids = delivery.setdefault("outbound_message_ids", [])
+            for index, message in enumerate(runtime_response["messages"]):
+                if index < len(outbound_ids):
+                    continue
+                response = post_payload(message, target_channel, False)
+                if not isinstance(response, dict) or not response.get("id"):
+                    fail("Discord did not return an outbound response message")
+                outbound_ids.append(str(response["id"]))
+                save_state(state_path, state)
+            if not delivery.get("ack_message_id"):
+                response = post_payload(runtime_response["ack"], target_channel, False)
+                if not isinstance(response, dict) or not response.get("id"):
+                    fail("Discord did not return an acknowledgement message")
+                delivery["ack_message_id"] = str(response["id"])
+                save_state(state_path, state)
             delivery["status"] = "acked"
-            delivery["ack_message_id"] = str(response["id"])
+            save_state(state_path, state)
             dispatched.append(item)
-        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as error:
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, KeyError, TypeError) as error:
             delivery["last_error"] = str(error)
             failures.append({"discord_message_id": item["discord_message_id"], "error": str(error)})
+            save_state(state_path, state)
     if not dry_run:
         save_state(state_path, state)
     print(json.dumps({
@@ -599,6 +647,12 @@ def self_test() -> None:
         ack = build_ack(valid, "agent-b")
         if ack["kind"] != "ack" or ack["ack_for"] != valid["message_id"]:
             fail("self-test did not build a matching acknowledgement")
+        outbound = sample_payload("question", "agent-b", "agent-a", "active", "Can Agent A confirm the next step?", valid["task_id"])
+        outbound["correlation_id"] = valid["correlation_id"]
+        outbound["reply_to"] = valid["message_id"]
+        runtime_response = validate_runtime_response({"ack": ack, "messages": [outbound]}, "agent-b", valid)
+        if runtime_response["messages"][0]["reply_to"] != valid["message_id"]:
+            fail("self-test did not validate the outbound reply link")
         handler = Path(__file__).parent / "examples" / "ack_agent.py"
         completed = subprocess.run(
             [sys.executable, str(handler)],

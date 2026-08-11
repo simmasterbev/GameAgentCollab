@@ -70,12 +70,12 @@ python .\collabctl.py dispatch --agent-id agent-b `
 ```
 
 With `--handler`, the adapter sends one payload as JSON on stdin. The handler
-must return one validated `ack` envelope as JSON on stdout, with `sender`
-matching the selected agent and `ack_for` matching the incoming payload's
-`message_id`. Only after the acknowledgement posts successfully does the
-selected agent's delivery become `acked`; messages addressed to both agents
-track each agent's acknowledgement independently. Handler failures remain
-retryable:
+may return a raw validated `ack` for compatibility, or a response object with
+an `ack` plus reply-linked outbound messages. Each outbound message must use
+`reply_to` to reference the delivered payload. Outbound messages post first and
+the acknowledgement posts last; only then does the selected agent's delivery
+become `acked`. Messages addressed to both agents track each acknowledgement
+independently. Handler failures remain retryable.
 
 ```powershell
 python .\collabctl.py dispatch --agent-id agent-b `
@@ -97,7 +97,7 @@ python .\collabctl.py ack <discord-message-id> `
 This is a delivery acknowledgement, not task completion or review approval.
 The repository now includes a real local Codex handler. It invokes the
 authenticated `codex exec` CLI in read-only mode, supplies the delivered
-payload and collaboration rules, and requires a schema-constrained JSON ack:
+payload and collaboration rules, and requires a schema-constrained response:
 
 ```powershell
 python .\collabctl.py dispatch --agent-id agent-b `
@@ -105,7 +105,8 @@ python .\collabctl.py dispatch --agent-id agent-b `
   --state-file '.\state\GAME-TEST-001.json' `
   --handler python .\codex_runtime.py `
     --workdir F:\GameAgentCollab `
-    --sandbox read-only
+    --sandbox read-only `
+    --reply-target agent-a
 ```
 
 The handler receives `COLLAB_AGENT_ID` from the dispatcher. Use the Unity

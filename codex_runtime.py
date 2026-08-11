@@ -24,7 +24,10 @@ def agent_id() -> str:
     return value
 
 
-def prompt_for(agent: str, payload: dict[str, object]) -> str:
+def prompt_for(agent: str, payload: dict[str, object], reply_target: str | None) -> str:
+    reply_instruction = "Set messages to an empty array."
+    if reply_target:
+        reply_instruction = f"Include exactly one outbound message in messages addressed to {reply_target}. Set reply_to to the delivered message_id. If the delivered message is a question or assist_request, answer it with a concise progress message; otherwise ask {reply_target} one concise question needed to continue the supervised conversation."
     return f"""You are {agent}, a coding agent participating in a supervised collaboration system.
 
 Discord has delivered the following structured collaboration message:
@@ -32,15 +35,7 @@ Discord has delivered the following structured collaboration message:
 {json.dumps(payload, indent=2)}
 ```
 
-For this runtime integration test, do not edit files, commit changes, send Discord messages, or claim task completion. Inspect only the available context if needed. Return exactly one JSON object and no Markdown or commentary. The object must be a schema_version 0.2 acknowledgement with:
-- kind: "ack"
-- sender: "{agent}"
-- target: "coordination-bot"
-- status: "accepted"
-- correlation_id and task_id copied from the delivered message
-- ack_for copied from the delivered message's message_id
-- a short summary saying what was received
-- a new UUID message_id and a current UTC created_at timestamp
+For this runtime integration test, do not edit files, commit changes, send Discord messages, or claim task completion. Inspect only the available context if needed. Return exactly one JSON object and no Markdown or commentary. The object must contain an ack object and a messages array. The ack must use sender "{agent}", target "coordination-bot", status "accepted", copy correlation_id and task_id, set ack_for to the delivered message_id, and include a new UUID message_id and current UTC created_at. {reply_instruction} Every outbound message must use sender "{agent}", a valid collaboration kind, a permitted target, a new UUID message_id, the same correlation_id and task_id, reply_to equal to the delivered message_id, and a concise summary.
 """
 
 
@@ -50,6 +45,7 @@ def main() -> int:
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
     parser.add_argument("--codex", default=os.environ.get("CODEX_BIN", "codex"))
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--reply-target", choices=("agent-a", "agent-b", "humans", "both-agents", "all"))
     args = parser.parse_args()
     if args.timeout < 1:
         fail("--timeout must be positive")
@@ -62,7 +58,9 @@ def main() -> int:
         fail("input must be a JSON object")
 
     agent = agent_id()
-    schema_path = Path(__file__).parent / "schemas" / "codex_ack.schema.json"
+    if args.reply_target == agent:
+        fail("--reply-target cannot be the same as COLLAB_AGENT_ID")
+    schema_path = Path(__file__).parent / "schemas" / "codex_response.schema.json"
     if not schema_path.exists():
         fail(f"missing output schema: {schema_path}")
     workdir = Path(args.workdir).resolve()
@@ -83,7 +81,7 @@ def main() -> int:
             str(schema_path),
             "--output-last-message",
             str(output_path),
-            prompt_for(agent, payload),
+            prompt_for(agent, payload, args.reply_target),
         ]
         try:
             completed = subprocess.run(
