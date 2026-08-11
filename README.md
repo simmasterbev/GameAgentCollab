@@ -163,10 +163,11 @@ python .\collabctl.py worker `
 ```
 
 Plain human messages mentioning `Agent A` or `Agent B` route to that agent;
-messages without one agent name route to `both-agents`. Plain JSON still must
-use a fenced `json` block. Bot-authored messages continue to require the
-protocol JSON so agents do not accidentally treat rendered responses as new
-human tasks.
+messages without one agent name route to `both-agents`. Human-origin tasks are
+answered for `humans`; agent-targeted tasks retain peer-to-peer question and
+handoff behavior. Plain JSON still must use a fenced `json` block. Bot-authored
+messages continue to require the protocol JSON so agents do not accidentally
+treat rendered responses as new human tasks.
 
 ## Always-on agent worker
 

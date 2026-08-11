@@ -24,9 +24,15 @@ def agent_id() -> str:
     return value
 
 
+def human_request(payload: dict[str, object]) -> bool:
+    return payload.get("sender") in {"human-owner", "human-collaborator"} or isinstance(payload.get("source"), dict)
+
+
 def prompt_for(agent: str, payload: dict[str, object], reply_target: str | None) -> str:
     reply_instruction = "Set messages to an empty array."
-    if reply_target:
+    if human_request(payload):
+        reply_instruction = "Include exactly one outbound progress message in messages addressed to humans. Answer the human's request directly and concisely. Do not ask another agent what to do. If the request needs more context, state the specific clarification or evidence needed in the progress summary. Set reply_to to the delivered message_id."
+    elif reply_target:
         reply_instruction = f"Include exactly one outbound message in messages addressed to {reply_target}. Set reply_to to the delivered message_id. If the delivered message is a question or assist_request, answer it with a concise progress message; otherwise ask {reply_target} one concise question needed to continue the supervised conversation."
     return f"""You are {agent}, a coding agent participating in a supervised collaboration system.
 
