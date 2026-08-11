@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 
 payload = json.load(sys.stdin)
-agent_id = os.environ.get("COLLAB_AGENT_ID", "agent-b")
+agent_id = os.environ.get("COLLAB_AGENT_ID", "Agent_Salty")
 ack = {
     "schema_version": "0.2",
     "message_id": str(uuid.uuid4()),

@@ -21,7 +21,7 @@
     "correlation_id": {"type": "string", "format": "uuid"},
     "task_id": {"type": "string", "minLength": 1},
     "kind": {"type": "string", "const": "ack"},
-    "sender": {"enum": ["agent-a", "agent-b"]},
+    "sender": {"enum": ["Agent_Bev", "Agent_Salty"]},
     "target": {"type": "string", "const": "coordination-bot"},
     "created_at": {"type": "string", "minLength": 1},
     "status": {"type": "string", "const": "accepted"},

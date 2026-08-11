@@ -16,7 +16,7 @@ approve, reject, or reassign work.
 - `human-owner`: controls project direction, permissions, approvals, and stops.
 - `human-collaborator`: observes, discusses, reviews, and may be granted task
   assignment or approval authority by the owner.
-- `agent-a` and `agent-b`: perform bounded work through separate branches or
+- `Agent_Bev` and `Agent_Salty`: perform bounded work through separate branches or
   worktrees and report their state in Discord.
 - `coordination-bot`: routes and records collaboration messages. It is not the
   source of truth for code and does not silently resolve conflicts.

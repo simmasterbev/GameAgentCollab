@@ -21,10 +21,10 @@ worker can keep a local agent awake by polling Discord and dispatching addressed
 messages; it is not a Discord Gateway service and repository writes remain
 explicitly controlled.
 
-## Salty / Agent B quick start
+## Salty / Agent_Salty quick start
 
 Salty should start with [`SALTY_HANDOFF.md`](SALTY_HANDOFF.md). It covers the
-GitHub invitation, Agent B environment, Discord worker command, first test,
+GitHub invitation, Agent_Salty environment, Discord worker command, first test,
 troubleshooting, and the separate Unity Git worktree boundary.
 
 ## Read in order
@@ -74,7 +74,7 @@ python .\collabctl.py create-task --live `
   --channel-id <tasks-channel-id> `
   --create-thread `
   --task-id CROSS-MACHINE-001 `
-  --summary "Desktop Agent A and BevBot001 Agent B should confirm a Discord conversation."
+  --summary "Desktop Agent_Bev and BevBot001 Agent_Salty should confirm a Discord conversation."
 ```
 
 The live mode currently posts messages to the configured channel, and the
@@ -98,7 +98,7 @@ delivers pending messages addressed to one agent. Without a handler it prints
 the pending JSON job for an external runtime:
 
 ```powershell
-python .\collabctl.py dispatch --agent-id agent-b `
+python .\collabctl.py dispatch --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\GAME-TEST-001.json'
 ```
@@ -112,7 +112,7 @@ become `acked`. Messages addressed to both agents track each acknowledgement
 independently. Handler failures remain retryable.
 
 ```powershell
-python .\collabctl.py dispatch --agent-id agent-b `
+python .\collabctl.py dispatch --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\GAME-TEST-001.json' `
   --handler python .\examples\ack_agent.py
@@ -123,7 +123,7 @@ ID:
 
 ```powershell
 python .\collabctl.py ack <discord-message-id> `
-  --agent-id agent-b `
+  --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\GAME-TEST-001.json'
 ```
@@ -134,13 +134,13 @@ authenticated `codex exec` CLI in read-only mode, supplies the delivered
 payload and collaboration rules, and requires a schema-constrained response:
 
 ```powershell
-python .\collabctl.py dispatch --agent-id agent-b `
+python .\collabctl.py dispatch --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\GAME-TEST-001.json' `
   --handler python .\codex_runtime.py `
     --workdir F:\GameAgentCollab `
     --sandbox read-only `
-    --reply-target agent-a
+    --reply-target Agent_Bev
 ```
 
 The handler receives `COLLAB_AGENT_ID` from the dispatcher. Use the Unity
@@ -158,17 +158,17 @@ Enable this mode on the worker with `--natural-language`:
 
 ```powershell
 python .\collabctl.py worker `
-  --agent-id agent-b `
+  --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\CROSS-MACHINE-B.json' `
   --natural-language `
   --handler python .\codex_runtime.py `
     --workdir C:\Users\bevadmin\GameAgentCollab `
     --sandbox read-only `
-    --reply-target agent-a
+    --reply-target Agent_Bev
 ```
 
-Plain human messages mentioning `Agent A` or `Agent B` route to that agent;
+Plain human messages mentioning `Agent_Bev` or `Agent_Salty` route to that agent;
 messages without one agent name route to `both-agents`. Human-origin tasks are
 answered for `humans`; agent-targeted tasks retain peer-to-peer question and
 handoff behavior. Plain JSON still must use a fenced `json` block. Bot-authored
@@ -183,14 +183,14 @@ reply and acknowledgement, and keeps retryable failures in the state file:
 
 ```powershell
 python .\collabctl.py worker `
-  --agent-id agent-b `
+  --agent-id Agent_Salty `
   --channel-id <thread-channel-id> `
   --state-file '.\state\CROSS-MACHINE-B.json' `
   --natural-language `
   --handler python .\codex_runtime.py `
     --workdir C:\Users\bevadmin\GameAgentCollab `
     --sandbox read-only `
-    --reply-target agent-a
+    --reply-target Agent_Bev
 ```
 
 Use `--once` for a single poll/dispatch cycle. Stop the continuous worker with

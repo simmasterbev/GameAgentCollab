@@ -15,8 +15,8 @@ correlation_id: UUID shared by related messages
 task_id: stable task identifier
 kind: task | claim | progress | question | assist_request | delegation | pivot |
   blocker | handoff | review | control | ack
-sender: agent-a | agent-b | human-owner | human-collaborator | coordination-bot
-target: agent-a | agent-b | humans | coordination-bot | both-agents | all
+sender: Agent_Bev | Agent_Salty | human-owner | human-collaborator | coordination-bot
+target: Agent_Bev | Agent_Salty | humans | coordination-bot | both-agents | all
 created_at: ISO-8601 UTC timestamp
 status: proposed | claimed | active | blocked | review | accepted | rejected | released
 summary: short human-readable message
@@ -36,8 +36,8 @@ transition:
     transfer_ownership | accept_delegation | reject_delegation | integrate_subtask
   parent_task_id: stable parent task ID
   child_task_id: stable child task ID or none
-  from_owner: agent-a | agent-b | human-owner
-  proposed_owner: agent-a | agent-b | human-owner | none
+  from_owner: Agent_Bev | Agent_Salty | human-owner
+  proposed_owner: Agent_Bev | Agent_Salty | human-owner | none
   completed_work: []
   remaining_work: []
   scope_delta: []
@@ -80,14 +80,14 @@ human_action_required: true | false
   "correlation_id": "00000000-0000-4000-8000-000000000010",
   "task_id": "GAME-2026-001",
   "kind": "claim",
-  "sender": "agent-a",
+  "sender": "Agent_Bev",
   "target": "humans",
   "created_at": "2026-08-11T18:00:00Z",
   "status": "claimed",
   "summary": "Claiming the scenario-data validation task.",
   "repository": "cellular-automata-game",
-  "branch": "agent-a/scenario-data-validation",
-  "worktree": "agent-a-local",
+  "branch": "Agent_Bev/scenario-data-validation",
+  "worktree": "Agent_Bev-local",
   "base_commit": "0000000",
   "scope": ["LearningIndieDev/Assets/Scripts/Game/Simulation/**"],
   "changed_files": [],
@@ -109,20 +109,20 @@ human_action_required: true | false
   "correlation_id": "00000000-0000-4000-8000-000000000010",
   "task_id": "GAME-2026-001",
   "kind": "assist_request",
-  "sender": "agent-a",
-  "target": "agent-b",
+  "sender": "Agent_Bev",
+  "target": "Agent_Salty",
   "created_at": "2026-08-11T18:35:00Z",
   "status": "active",
   "summary": "Please take the preview validation subtask; I will retain the parent task.",
   "repository": "cellular-automata-game",
-  "branch": "agent-a/scenario-data-validation",
-  "worktree": "agent-a-local",
+  "branch": "Agent_Bev/scenario-data-validation",
+  "worktree": "Agent_Bev-local",
   "base_commit": "0000000",
   "scope": ["LearningIndieDev/Assets/Scripts/Game/Presentation/**"],
   "changed_files": [],
   "validation": ["Scenario data tests pass"],
   "risks": ["Preview code may overlap with the existing UI work."],
-  "next_actions": ["Wait for Agent B acceptance before treating the subtask as active."],
+  "next_actions": ["Wait for Agent_Salty acceptance before treating the subtask as active."],
   "context_links": [],
   "claim_expires_at": "2026-08-11T20:00:00Z",
   "human_action_required": false,
@@ -130,8 +130,8 @@ human_action_required: true | false
     "action": "split_subtask",
     "parent_task_id": "GAME-2026-001",
     "child_task_id": "GAME-2026-001-B",
-    "from_owner": "agent-a",
-    "proposed_owner": "agent-b",
+    "from_owner": "Agent_Bev",
+    "proposed_owner": "Agent_Salty",
     "completed_work": ["Scenario data model is implemented."],
     "remaining_work": ["Add and validate the preview presentation path."],
     "scope_delta": ["Child task owns presentation scope only."],

@@ -36,8 +36,11 @@ KINDS = {
     "control",
     "ack",
 }
-SENDERS = {"agent-a", "agent-b", "human-owner", "human-collaborator", "coordination-bot"}
-TARGETS = {"agent-a", "agent-b", "humans", "coordination-bot", "both-agents", "all"}
+AGENT_BEV = "Agent_Bev"
+AGENT_SALTY = "Agent_Salty"
+AGENTS = {AGENT_BEV, AGENT_SALTY}
+SENDERS = {AGENT_BEV, AGENT_SALTY, "human-owner", "human-collaborator", "coordination-bot"}
+TARGETS = {AGENT_BEV, AGENT_SALTY, "humans", "coordination-bot", "both-agents", "all"}
 STATUSES = {"proposed", "claimed", "active", "blocked", "review", "accepted", "rejected", "released"}
 TRANSITIONS = {
     "request_assistance",
@@ -280,8 +283,13 @@ def natural_task_payload(message: dict[str, Any], content: str) -> dict[str, Any
     message_id = str(message.get("id", ""))
     if not message_id.isdigit():
         fail("natural-language messages require a numeric Discord message ID")
-    mentioned_agents = set(re.findall(r"\bagent[-\s]?([ab])\b", content.lower()))
-    target = "both-agents" if len(mentioned_agents) != 1 else f"agent-{next(iter(mentioned_agents))}"
+    normalized = content.lower()
+    mentioned_agents = set()
+    if re.search(r"\bagent[_\s-]?(?:bev|a)\b", normalized):
+        mentioned_agents.add(AGENT_BEV)
+    if re.search(r"\bagent[_\s-]?(?:salty|b)\b", normalized):
+        mentioned_agents.add(AGENT_SALTY)
+    target = "both-agents" if len(mentioned_agents) != 1 else next(iter(mentioned_agents))
     channel_value = str(message.get("channel_id", ""))
     payload = {
         "schema_version": "0.2",
@@ -344,7 +352,7 @@ def inbox_entry(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     targets = payload.get("target")
-    delivery_agents = {targets} if targets in {"agent-a", "agent-b"} else {"agent-a", "agent-b"}
+    delivery_agents = {targets} if targets in AGENTS else set(AGENTS)
     return {
         "discord_message_id": discord_message_id,
         "channel_id": channel_id_value,
@@ -516,8 +524,8 @@ def dispatch_messages(
     natural_language: bool = False,
     emit: bool = True,
 ) -> dict[str, Any]:
-    if agent_id not in {"agent-a", "agent-b"}:
-        fail("--agent-id must be agent-a or agent-b")
+    if agent_id not in AGENTS:
+        fail(f"--agent-id must be {AGENT_BEV} or {AGENT_SALTY}")
     if not 1 <= limit <= 100:
         fail("--limit must be between 1 and 100")
     if timeout < 1:
@@ -646,8 +654,8 @@ def post_payload(payload: dict[str, Any], target_channel: str, dry_run: bool) ->
 
 
 def build_ack(payload: dict[str, Any], agent_id: str) -> dict[str, Any]:
-    if agent_id not in {"agent-a", "agent-b"}:
-        fail("agent ID must be agent-a or agent-b")
+    if agent_id not in AGENTS:
+        fail(f"agent ID must be {AGENT_BEV} or {AGENT_SALTY}")
     ack = {
         "schema_version": "0.2",
         "message_id": str(uuid.uuid4()),
@@ -723,7 +731,7 @@ def sample_payload(kind: str, sender: str, target: str, status: str, summary: st
 
 
 def self_test() -> None:
-    valid = sample_payload("progress", "agent-a", "humans", "active", "Working on the test task.", "GAME-TEST-001")
+    valid = sample_payload("progress", AGENT_BEV, "humans", "active", "Working on the test task.", "GAME-TEST-001")
     validate(valid)
     invalid = dict(valid, kind="assist_request")
     try:
@@ -760,7 +768,7 @@ def self_test() -> None:
             "channel_id": "123",
             "author": {"id": "789", "bot": False},
             "timestamp": "2026-08-11T00:00:00Z",
-            "content": "Agent B, inspect the worker and report back in plain English.",
+            "content": "Agent_Salty, inspect the worker and report back in plain English.",
         }
         natural_state = empty_state()
         natural_result, natural_state = consume_messages(
@@ -769,8 +777,8 @@ def self_test() -> None:
         natural_record = natural_state["channels"]["123"]["inbox"][0]
         if len(natural_result["messages"]) != 1:
             fail("self-test did not convert a human message into a task")
-        if natural_record["payload"]["target"] != "agent-b":
-            fail("self-test did not route a natural-language Agent B request")
+        if natural_record["payload"]["target"] != AGENT_SALTY:
+            fail("self-test did not route a natural-language Agent_Salty request")
         if natural_record["payload"]["source"]["request_text"] != natural_message["content"]:
             fail("self-test did not preserve the original human request")
         rendered_payload, rendered_error = parse_structured_message(
@@ -778,13 +786,13 @@ def self_test() -> None:
         )
         if rendered_error or rendered_payload != natural_record["payload"]:
             fail("self-test did not round-trip rendered protocol JSON")
-        ack = build_ack(valid, "agent-b")
+        ack = build_ack(valid, AGENT_SALTY)
         if ack["kind"] != "ack" or ack["ack_for"] != valid["message_id"]:
             fail("self-test did not build a matching acknowledgement")
-        outbound = sample_payload("question", "agent-b", "agent-a", "active", "Can Agent A confirm the next step?", valid["task_id"])
+        outbound = sample_payload("question", AGENT_SALTY, AGENT_BEV, "active", "Can Agent_Bev confirm the next step?", valid["task_id"])
         outbound["correlation_id"] = valid["correlation_id"]
         outbound["reply_to"] = valid["message_id"]
-        runtime_response = validate_runtime_response({"ack": ack, "messages": [outbound]}, "agent-b", valid)
+        runtime_response = validate_runtime_response({"ack": ack, "messages": [outbound]}, AGENT_SALTY, valid)
         if runtime_response["messages"][0]["reply_to"] != valid["message_id"]:
             fail("self-test did not validate the outbound reply link")
         handler = Path(__file__).parent / "examples" / "ack_agent.py"
@@ -793,16 +801,16 @@ def self_test() -> None:
             input=json.dumps(valid) + "\n",
             capture_output=True,
             text=True,
-            env={**os.environ, "COLLAB_AGENT_ID": "agent-b"},
+            env={**os.environ, "COLLAB_AGENT_ID": AGENT_SALTY},
             check=False,
         )
         if completed.returncode != 0:
             fail(f"self-test handler failed: {completed.stderr.strip()}")
         handler_ack = json.loads(completed.stdout)
         validate(handler_ack)
-        if handler_ack["sender"] != "agent-b" or handler_ack["ack_for"] != valid["message_id"]:
+        if handler_ack["sender"] != AGENT_SALTY or handler_ack["ack_for"] != valid["message_id"]:
             fail("self-test handler returned the wrong acknowledgement")
-        targeted = sample_payload("question", "agent-a", "agent-b", "active", "Can Agent B review this?", "GAME-TEST-002")
+        targeted = sample_payload("question", AGENT_BEV, AGENT_SALTY, "active", "Can Agent_Salty review this?", "GAME-TEST-002")
         targeted_message = {
             "id": "102",
             "channel_id": "123",
@@ -812,16 +820,16 @@ def self_test() -> None:
         }
         dispatch_state = empty_state()
         consume_messages("123", [targeted_message], dispatch_state)
-        pending = pending_for_agent(dispatch_state["channels"]["123"], "agent-b")
+        pending = pending_for_agent(dispatch_state["channels"]["123"], AGENT_SALTY)
         if len(pending) != 1 or pending[0]["payload"]["message_id"] != targeted["message_id"]:
             fail("self-test did not select a targeted pending message")
         broadcast = sample_payload("task", "human-owner", "both-agents", "proposed", "Both agents should see this.", "GAME-TEST-003")
         broadcast_message = dict(targeted_message, id="103", content=discord_content(broadcast))
         consume_messages("123", [broadcast_message], dispatch_state)
         broadcast_record = dispatch_state["channels"]["123"]["inbox"][-1]
-        broadcast_record["deliveries"]["agent-b"]["status"] = "acked"
-        if len(pending_for_agent(dispatch_state["channels"]["123"], "agent-a")) != 1:
-            fail("self-test suppressed Agent A after only Agent B acknowledged")
+        broadcast_record["deliveries"][AGENT_SALTY]["status"] = "acked"
+        if len(pending_for_agent(dispatch_state["channels"]["123"], AGENT_BEV)) != 1:
+            fail("self-test suppressed Agent_Bev after only Agent_Salty acknowledged")
         worker_calls: list[dict[str, Any]] = []
         original_dispatch = dispatch_messages
         try:
@@ -830,7 +838,7 @@ def self_test() -> None:
                 return {"mode": "dispatch", "messages": [], "failures": []}
 
             globals()["dispatch_messages"] = fake_dispatch
-            run_worker("123", "agent-b", state_path, 1, ["python"], 1, 0.01, True, False)
+            run_worker("123", AGENT_SALTY, state_path, 1, ["python"], 1, 0.01, True, False)
         finally:
             globals()["dispatch_messages"] = original_dispatch
         if len(worker_calls) != 1 or worker_calls[0]["kwargs"].get("emit") is not False:
@@ -847,10 +855,10 @@ def test_sequence(
     correlation_id = str(uuid.uuid4())
     messages = [
         sample_payload("task", "human-owner", "both-agents", "proposed", "Run the supervised collaboration test.", task),
-        sample_payload("claim", "agent-a", "humans", "claimed", "Agent A claims the fake task.", task),
-        sample_payload("assist_request", "agent-a", "agent-b", "active", "Agent A requests a child subtask from Agent B.", task),
-        sample_payload("delegation", "agent-b", "humans", "accepted", "Agent B accepts the child subtask.", task),
-        sample_payload("handoff", "agent-b", "humans", "review", "Agent B hands off the child subtask.", task),
+        sample_payload("claim", AGENT_BEV, "humans", "claimed", "Agent_Bev claims the fake task.", task),
+        sample_payload("assist_request", AGENT_BEV, AGENT_SALTY, "active", "Agent_Bev requests a child subtask from Agent_Salty.", task),
+        sample_payload("delegation", AGENT_SALTY, "humans", "accepted", "Agent_Salty accepts the child subtask.", task),
+        sample_payload("handoff", AGENT_SALTY, "humans", "review", "Agent_Salty hands off the child subtask.", task),
     ]
     for message in messages:
         message["correlation_id"] = correlation_id
@@ -858,8 +866,8 @@ def test_sequence(
         "action": "split_subtask",
         "parent_task_id": task,
         "child_task_id": f"{task}-B",
-        "from_owner": "agent-a",
-        "proposed_owner": "agent-b",
+        "from_owner": AGENT_BEV,
+        "proposed_owner": AGENT_SALTY,
         "completed_work": ["Fake setup"],
         "remaining_work": ["Fake child task"],
         "scope_delta": ["Test-only scope"],
@@ -872,8 +880,8 @@ def test_sequence(
         "action": "accept_delegation",
         "parent_task_id": task,
         "child_task_id": f"{task}-B",
-        "from_owner": "agent-a",
-        "proposed_owner": "agent-b",
+        "from_owner": AGENT_BEV,
+        "proposed_owner": AGENT_SALTY,
         "completed_work": [],
         "remaining_work": ["Fake child task"],
         "scope_delta": ["Test-only scope"],

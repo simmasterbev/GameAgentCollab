@@ -11,6 +11,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+AGENT_BEV = "Agent_Bev"
+AGENT_SALTY = "Agent_Salty"
+AGENTS = (AGENT_BEV, AGENT_SALTY)
+
 
 def fail(message: str) -> None:
     print(f"codex-runtime error: {message}", file=sys.stderr)
@@ -19,8 +23,8 @@ def fail(message: str) -> None:
 
 def agent_id() -> str:
     value = os.environ.get("COLLAB_AGENT_ID")
-    if value not in {"agent-a", "agent-b"}:
-        fail("COLLAB_AGENT_ID must be agent-a or agent-b")
+    if value not in AGENTS:
+        fail(f"COLLAB_AGENT_ID must be {AGENT_BEV} or {AGENT_SALTY}")
     return value
 
 
@@ -51,7 +55,7 @@ def main() -> int:
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
     parser.add_argument("--codex", default=os.environ.get("CODEX_BIN", "codex"))
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--reply-target", choices=("agent-a", "agent-b", "humans", "both-agents", "all"))
+    parser.add_argument("--reply-target", choices=(*AGENTS, "humans", "both-agents", "all"))
     args = parser.parse_args()
     if args.timeout < 1:
         fail("--timeout must be positive")

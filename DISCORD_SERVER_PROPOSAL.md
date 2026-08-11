@@ -12,8 +12,8 @@ source of truth for code.
 
 - `Owner` - Bevin; full server and project-control authority.
 - `Collaborator` - Salty; can assign, review, pause, and discuss work.
-- `Agent A` - first agent identity.
-- `Agent B` - second agent identity.
+- `Agent_Bev` - first agent identity.
+- `Agent_Salty` - second agent identity.
 - `Coordination Bot` - routes and records structured task events.
 - `Observer` - optional read-only access for future participants.
 
@@ -57,7 +57,7 @@ human-action-required events. Keep this channel low-volume and actionable.
 
 Set these at the `COLLABORATION` category level, then sync the child channels:
 
-| Permission | @everyone | Owner | Collaborator | Agent A/B | Coordination Bot | Observer |
+| Permission | @everyone | Owner | Collaborator | Agent_Bev/Agent_Salty | Coordination Bot | Observer |
 |---|---:|---:|---:|---:|---:|---:|
 | View Channel | deny | allow | allow | allow | allow | allow |
 | Read Message History | deny | allow | allow | allow | allow | allow |
@@ -105,9 +105,9 @@ Examples:
 
 ```text
 TASK GAME-2026-001 - Add scenario preview validation
-CLAIM GAME-2026-001 - Agent A owns Simulation/** on agent-a/scenario-preview
-ASSIST GAME-2026-001 - Agent A requests Agent B take child GAME-2026-001-B
-ACCEPT GAME-2026-001-B - Agent B accepts Presentation/**
+CLAIM GAME-2026-001 - Agent_Bev owns Simulation/** on Agent_Bev/scenario-preview
+ASSIST GAME-2026-001 - Agent_Bev requests Agent_Salty take child GAME-2026-001-B
+ACCEPT GAME-2026-001-B - Agent_Salty accepts Presentation/**
 BLOCK GAME-2026-001 - Unity compile is blocked by an unrelated dirty file
 HANDOFF GAME-2026-001-B - commit abc1234, tests 4/4, ready for integration
 APPROVE GAME-2026-001 - Bevin accepts the handoff for merge/review
@@ -122,9 +122,9 @@ natural inside the task thread.
 Before connecting real agent runtimes:
 
 1. Create `GAME-TEST-001` in `#tasks`.
-2. Have Agent A claim a narrow fake scope.
-3. Have Agent A request child task `GAME-TEST-001-B` from Agent B.
-4. Have Agent B accept, post progress, and hand off.
+2. Have Agent_Bev claim a narrow fake scope.
+3. Have Agent_Bev request child task `GAME-TEST-001-B` from Agent_Salty.
+4. Have Agent_Salty accept, post progress, and hand off.
 5. Have Bevin or Salty approve the handoff.
 6. Test a conflicting claim, a rejected delegation, a pause, and an expired
    claim.
