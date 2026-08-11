@@ -9,8 +9,9 @@ Discord credentials, bot tokens, or private conversation transcripts.
 
 ## Current status
 
-Documentation plus a dependency-free HTTPS messaging CLI. No always-on Discord
-Gateway runtime or repository automation has been built yet.
+Documentation plus a dependency-free HTTPS messaging CLI and an optional local
+Codex runtime bridge. No always-on Discord Gateway runtime or repository write
+automation has been built yet.
 
 ## Read in order
 
@@ -52,10 +53,9 @@ ignored `.collabctl-state.json` file:
 python .\collabctl.py poll --channel-id <channel-id>
 ```
 
-Use `--dry-run` to inspect the poll request without contacting Discord. The
-current poll is a receive-and-record boundary: it does not yet wake agent
-runtimes, dispatch tasks, or provide an acknowledgement transaction if a
-downstream agent fails after polling. Those are later gates.
+Use `--dry-run` to inspect the poll request without contacting Discord. Polling
+alone is a receive-and-record boundary; `dispatch` is the explicit step that
+hands a queued message to an agent runtime.
 
 ## Agent dispatch and acknowledgements
 
@@ -95,8 +95,22 @@ python .\collabctl.py ack <discord-message-id> `
 ```
 
 This is a delivery acknowledgement, not task completion or review approval.
-The current adapter does not yet invoke a real LLM/Codex worker or interpret
-its work; the handler contract is deliberately the narrow integration seam.
+The repository now includes a real local Codex handler. It invokes the
+authenticated `codex exec` CLI in read-only mode, supplies the delivered
+payload and collaboration rules, and requires a schema-constrained JSON ack:
+
+```powershell
+python .\collabctl.py dispatch --agent-id agent-b `
+  --channel-id <thread-channel-id> `
+  --state-file '.\state\GAME-TEST-001.json' `
+  --handler python .\codex_runtime.py `
+    --workdir F:\GameAgentCollab `
+    --sandbox read-only
+```
+
+The handler receives `COLLAB_AGENT_ID` from the dispatcher. Use the Unity
+checkout as `--workdir` only after a separate branch/worktree and edit policy
+are ready. `workspace-write` is supported but intentionally not the default.
 
 ## Core boundary
 
