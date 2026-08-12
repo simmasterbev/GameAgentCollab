@@ -27,6 +27,11 @@ Salty should start with [`SALTY_HANDOFF.md`](SALTY_HANDOFF.md). It covers the
 GitHub invitation, Agent_Salty environment, Discord worker command, first test,
 troubleshooting, and the separate Unity Git worktree boundary.
 
+For the complete day-to-day operator procedure for both agents, use
+[`OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md). It includes setup, worker startup,
+plain-English task patterns, peer delegation, clean-thread tests, troubleshooting,
+restart, and Git/worktree boundaries.
+
 ## Read in order
 
 1. `COLLABORATION_CHARTER.md`
